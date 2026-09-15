@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+
+import { createInitialEnrollmentState } from "../src/lib/enrollment-machine";
+import { initialVoiceState, voiceStateReducer } from "../src/lib/voice-state";
+
+describe("Voice Guide lifecycle", () => {
+  it("derives every lifecycle state from connection and voice events", () => {
+    let state = voiceStateReducer(initialVoiceState, { type: "START_REQUESTED" });
+    expect(state.status).toBe("connecting");
+
+    state = voiceStateReducer(state, { type: "SESSION_READY" });
+    expect(state.status).toBe("listening");
+
+    state = voiceStateReducer(state, { type: "USER_SPEECH_STOPPED" });
+    expect(state.status).toBe("thinking");
+
+    state = voiceStateReducer(state, { type: "REPLY_AUDIO" });
+    expect(state.status).toBe("speaking");
+
+    state = voiceStateReducer(state, { type: "REPLY_DONE" });
+    expect(state.status).toBe("listening");
+
+    state = voiceStateReducer(state, {
+      type: "FAILED",
+      code: "connection-failed",
+    });
+    expect(state.status).toBe("error");
+
+    state = voiceStateReducer(state, { type: "ENDED" });
+    expect(state).toEqual(initialVoiceState);
+  });
+
+  it("replaces partial user captions and records the final agent caption", () => {
+    let state = voiceStateReducer(initialVoiceState, {
+      type: "USER_TRANSCRIPT",
+      text: "Hello",
+    });
+    state = voiceStateReducer(state, {
+      type: "USER_TRANSCRIPT",
+      text: "Hello there",
+    });
+    state = voiceStateReducer(state, {
+      type: "AGENT_TRANSCRIPT",
+      text: "Hello there.",
+    });
+
+    expect(state.userCaption).toBe("Hello there");
+    expect(state.agentCaption).toBe("Hello there.");
+  });
+
+  it("does not alter enrollment state after a voice failure", () => {
+    const enrollmentState = createInitialEnrollmentState();
+    const voiceState = voiceStateReducer(initialVoiceState, {
+      type: "FAILED",
+      code: "connection-failed",
+    });
+
+    expect(voiceState.status).toBe("error");
+    expect(enrollmentState).toEqual(createInitialEnrollmentState());
+  });
+});

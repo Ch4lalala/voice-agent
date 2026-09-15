@@ -4,8 +4,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AksesSuara — Foundation",
-  description: "The runnable foundation for the AksesSuara hackathon MVP.",
+  title: "Welcome — AksesSuara",
+  description:
+    "A deterministic in-memory AksesSuara enrollment demonstration for essential digital services.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

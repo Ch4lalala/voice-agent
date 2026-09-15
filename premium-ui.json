@@ -1,0 +1,18 @@
+{
+  "profile": "product",
+  "sourceRoots": ["src"],
+  "locale": "en",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "Voice permission", "Live voice state"],
+  "ownership": {
+    "Select/Listbox": "native",
+    "Date": "typed",
+    "Form": "React reducer and shared fields",
+    "Scrollbar": "global stylesheet",
+    "Voice permission": "VoiceGuideProvider and browser permission prompt",
+    "Live voice state": "AssemblyAI event reducer and embedded VoiceGuide"
+  },
+  "evidence": {
+    "failurePaths": "tests/voice-session-controller.test.ts"
+  }
+}

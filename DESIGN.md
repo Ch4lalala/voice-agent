@@ -8,40 +8,68 @@ colors:
   ink: "#17324D"
   muted: "#53697C"
   primary: "#176B72"
+  primary-dark: "#0D4F55"
+  primary-soft: "#E4F1EF"
   border: "#C8D8D5"
+  warning: "#805A00"
+  warning-soft: "#FFF6DA"
+  danger: "#9A3F32"
+  danger-soft: "#FFF0ED"
+  success: "#2A7155"
 typography:
   display:
     fontFamily: "Arial, Helvetica, sans-serif"
-    fontSize: "4.75rem"
-    lineHeight: "0.95"
+    fontSize: "3.2rem"
+    lineHeight: "1.02"
   body:
     fontFamily: "Arial, Helvetica, sans-serif"
     fontSize: "1rem"
     lineHeight: "1.65"
 rounded:
   card: "1rem"
+  control: "0.75rem"
   pill: "999px"
 spacing:
-  page-min: "1rem"
-  page-max: "4rem"
+  page-min: "0.75rem"
+  page-max: "3rem"
   section-gap: "2rem"
 components:
   application:
     backgroundColor: "{colors.canvas}"
     textColor: "{colors.ink}"
     typography: "{typography.body}"
-  foundation-card:
+  screen-preview:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.card}"
     padding: "{spacing.section-gap}"
-  foundation-copy:
+  secondary-copy:
     textColor: "{colors.muted}"
     typography: "{typography.body}"
-  foundation-divider:
+  divider:
     backgroundColor: "{colors.border}"
     size: "1px"
+  primary-action:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.surface}"
+    rounded: "{rounded.control}"
+  voice-guide:
+    backgroundColor: "{colors.primary-soft}"
+    textColor: "{colors.primary-dark}"
+    rounded: "{rounded.control}"
+  warning-notice:
+    backgroundColor: "{colors.warning-soft}"
+    textColor: "{colors.warning}"
+    rounded: "{rounded.control}"
+  error-status:
+    backgroundColor: "{colors.danger-soft}"
+    textColor: "{colors.danger}"
+    rounded: "{rounded.pill}"
+  active-status:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.success}"
+    rounded: "{rounded.pill}"
 ---
 
 # AksesSuara Design System
@@ -59,64 +87,67 @@ A well-organized public assistance desk: calm, legible, clearly labeled, and rea
 - **Locale and language policy:** English for the MVP. Future localization is outside the current MVP scope.
 - **Usage scene:** Mobile and desktop browsers, potentially under time pressure and with limited digital confidence.
 - **Register:** Product. Clarity and trust take precedence over marketing expression.
-- **Memorable signature:** A narrow teal guidance rail can mark the current focal area without imitating any official service.
-- **Restraint:** Forms, instructions, and state changes must remain quiet and familiar.
+- **Memorable signature:** A narrow teal guidance rail and simple waveform mark identify the current focal area without imitating an official service.
+- **Restraint:** Forms, instructions, and state changes remain quiet and familiar.
 - **Anti-references:** Do not copy BPJS Kesehatan or Mobile JKN trade dress; avoid dense dashboards, detached chat panels, tiny controls, and decorative motion.
-- **Token ownership/runtime mapping:** Hand-authored CSS variables in `src/app/globals.css` are the runtime source. This file mirrors their accepted values and explains their roles. Future shared components must consume the semantic variables rather than repeat raw values.
+- **Token ownership/runtime mapping:** Hand-authored CSS variables in `src/app/globals.css` are the runtime source. This file mirrors their accepted values and explains their roles. Shared components consume the semantic variables rather than repeat raw values.
 
 ## Colors
 
-The canvas and white surface create a quiet reading field. Ink and muted colors provide text hierarchy. Primary identifies guidance and primary focus without implying official BPJS branding. Future focus treatment must remain visually distinct and must not depend on color alone. The Phase 0 placeholder maps every documented color directly to a root CSS variable.
+The canvas and white surface create a quiet reading field. Ink and muted colors provide text hierarchy. Primary identifies guidance and active focus without implying official BPJS branding. Dark and soft primary variants support readable embedded guidance surfaces. Warning, danger, and success tokens always appear with text labels or symbols, so status never depends on color alone. Every documented color maps to a root CSS variable in `src/app/globals.css`.
 
 ## Typography
 
-The foundation uses a local Arial/Helvetica/system sans-serif stack so builds do not depend on a font network request. Display type is compact but reserved for short headings. Body copy stays at or above a 16-pixel baseline with generous line height. Interface copy uses sentence case and plain English.
+The interface uses a local Arial/Helvetica/system sans-serif stack so builds do not depend on a font network request. Display type is compact but reserved for short headings. Body copy stays at or above a 16-pixel baseline, while secondary labels never carry the primary instruction. Interface copy uses sentence case and plain English.
 
 ## Layout
 
-Content uses natural document scrolling and a responsive page gutter from 1rem to 4rem. The Phase 0 placeholder is a single centered status card; it is not a preview of the enrollment screens. Later product layouts must remain usable at 320 pixels without fixed-width content.
+Content uses natural document scrolling and a responsive page gutter from 0.75rem to 3rem. At wide viewports the task and Voice Guide share one bordered workflow card; below 832 pixels the guide moves beneath the task while remaining inside the same card. Form grids become one column and action groups stack when needed on narrow screens. No content region relies on a fixed viewport height or fixed content width.
 
 ## Elevation & Depth
 
-Use white surfaces, borders, and one restrained shadow for primary contained regions. Do not stack decorative shadows or blur effects. High-contrast mode must retain visible boundaries.
+White surfaces, borders, and one restrained shadow distinguish the primary workflow region. The Voice Guide uses a subtle tonal shift rather than a detached floating treatment. High-contrast mode retains explicit boundaries.
 
 ## Shapes
 
-Containers use the 1rem card radius. Pill geometry is reserved for small status indicators, never for large content containers. The guidance rail is a straight vertical accent inside the card edge.
+Containers use the 1rem card radius. Controls use 0.75rem corners. Pill geometry is reserved for small status indicators. The asymmetric brand and microphone shapes provide an independent AksesSuara signature without borrowing official logos.
 
 ## Components
 
-### Foundational visual states
+### Visual states
 
-Interactive states are intentionally absent from the Phase 0 placeholder. Future controls require visible hover, focus-visible, pressed, disabled, busy, success, warning, and error treatments that do not rely on color alone.
+Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, **Speaking**, or **Error** beside a visible status dot. Teal, amber, and coral support the labels but never replace them. Phase 3 derives these states from connection and voice events; it does not use timers or simulated fixtures. Live caption cards stay in the same workflow surface as the active step and explicitly state that their content is not saved.
 
 ### Buttons and actions
 
-No product action is implemented in Phase 0. Future actions must use semantic buttons or links, preserve a minimum effective target of approximately 44 by 44 pixels, and keep one primary action per screen.
+Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Repeat and slower-speech controls remain disabled with nearby explanatory copy because they are outside Phase 3.
 
 ### Navigation and data display
 
-No product navigation or data display is implemented in Phase 0. Future progress and review structures must use semantic text alongside visual indicators.
+The five-step enrollment progress uses an ordered list, numbered circles, text labels, and `aria-current="step"`. Screen changes move focus to the new heading, while blocked progress moves focus to the first invalid control. Review data uses description lists, wraps long values safely, and exposes a text-labeled edit action for every section.
 
 ### Forms and overlays
 
-No forms or overlays are implemented in Phase 0. Future form controls must use visible labels, app-owned validation, and privacy-safe handling defined in the PRD.
+Forms use visible labels, persistent hints, semantic field types, and dummy data only. The date remains a typed `YYYY-MM-DD` field and relationship remains a native platform select. Application-owned validation appears beside each field and uses the shared danger treatment. Sensitive controls carry a **Type only** label, retain their raw value only in React memory, and render only the allowed trailing digits while blurred. Facility candidates use full-row radio targets followed by an explicit inline confirmation. Reset confirmation is also inline; Phase 2 introduces no overlays or dialogs.
 
 ### Iconography
 
-No icon set is selected in Phase 0. Future icons must be simple, consistently stroked, and paired with text whenever meaning is not universal.
+No external icon set is required. Small CSS-drawn marks and text characters are decorative or paired with explicit labels; non-universal icon-only actions are not used.
 
 ### Motion
 
-No animation is used in Phase 0. Future motion must communicate voice or focus state, be interruptible, and respect `prefers-reduced-motion`.
+The only animation is a restrained waveform response during real Listening, Thinking, and Speaking states. `prefers-reduced-motion` removes it completely. Natural scrolling keeps all content reachable at short viewport heights.
 
 ### Content and data visualization
 
-The product voice is patient, concise, and direct. Labels describe what the user can control. No analytics or measured-impact claims appear in the MVP.
+The product voice is patient, concise, and direct. Labels describe what the user can control. Fictional data is marked locally and globally. No analytics or measured-impact claims appear in the MVP.
 
 ## Do's and Don'ts
 
 - **Do:** Use calm hierarchy and generous reading space to make the next task obvious.
-- **Do:** Keep visual tokens mapped through the root CSS variables and accessible in forced-colors mode.
+- **Do:** Keep visual tokens mapped through root CSS variables and accessible in forced-colors mode.
+- **Do:** Keep the Voice Guide within the same bordered workflow surface as the active form.
+- **Do:** Keep validation adjacent, deterministic, and paired with first-invalid-field focus.
+- **Do:** Mask sensitive values outside active editing and on Review.
 - **Don't:** Resemble an official BPJS Kesehatan product or imply official integration.
-- **Don't:** introduce product screens, controls, or workflow behavior before their approved implementation phase.
+- **Don't:** Imply that local completion submits information or that voice can read, validate, or control enrollment fields.
