@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  --color-canvas: #f4f8f7;
+  --color-surface: #ffffff;
+  --color-ink: #17324d;
+  --color-muted: #53697c;
+  --color-primary: #176b72;
+  --color-border: #c8d8d5;
+  --radius-card: 1rem;
+  --space-page: clamp(1rem, 5vw, 4rem);
+  --shadow-card: 0 1.25rem 3rem rgb(23 50 77 / 10%);
+  --scrollbar-thumb: #78918d;
+  --scrollbar-track: #e8efed;
+}
+
+@theme inline {
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-ink);
+  --font-sans: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 0.1875rem solid var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  min-height: 100svh;
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+.foundation-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 100svh;
+  place-items: center;
+  padding: var(--space-page);
+}
+
+.foundation-card {
+  width: 100%;
+  max-width: 42rem;
+  min-width: 0;
+  padding: clamp(1.5rem, 5vw, 3.5rem);
+  border: 1px solid var(--color-border);
+  border-left: 0.375rem solid var(--color-primary);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.foundation-kicker {
+  margin: 0 0 1rem;
+  color: var(--color-primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 9vw, 4.75rem);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+
+.foundation-copy {
+  max-width: 34rem;
+  margin: 1.5rem 0 0;
+  color: var(--color-muted);
+  font-size: clamp(1.0625rem, 2.5vw, 1.25rem);
+  line-height: 1.65;
+}
+
+.foundation-status {
+  margin: 2rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-ink);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+@media (forced-colors: active) {
+  * {
+    scrollbar-color: auto;
+  }
+
+  .foundation-card {
+    border: 2px solid CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+  }
+}
