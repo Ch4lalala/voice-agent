@@ -68,19 +68,30 @@ export interface EnrollmentState {
 export interface EnrollmentFieldContext {
   id: EnrollmentFieldId;
   label: string;
+  description: string;
   required: boolean;
   sensitive: boolean;
   complete: boolean;
   error: string | null;
 }
 
+export type EnrollmentAllowedAction =
+  | "start_voice_guidance"
+  | "continue_without_voice"
+  | "previous"
+  | "continue"
+  | "review_information"
+  | "edit_section"
+  | "confirm_demo_completion"
+  | "reset_demo";
+
 export interface EnrollmentScreenContext {
-  screenId: EnrollmentStep;
+  screenId: EnrollmentScreenId;
   title: string;
   step: number;
   totalSteps: number;
   fields: EnrollmentFieldContext[];
-  allowedActions: string[];
+  allowedActions: EnrollmentAllowedAction[];
   canProceed: boolean;
 }
 

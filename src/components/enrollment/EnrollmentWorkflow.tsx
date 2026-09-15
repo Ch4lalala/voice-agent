@@ -4,7 +4,10 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import { createEnrollmentScreenContext } from "@/lib/enrollment-context";
 import { createInitialEnrollmentState, enrollmentReducer } from "@/lib/enrollment-machine";
-import { VoiceGuideProvider } from "@/components/voice/VoiceGuideProvider";
+import {
+  useVoiceGuide,
+  VoiceGuideProvider,
+} from "@/components/voice/VoiceGuideProvider";
 import type { EditableFieldId, EnrollmentScreenId, FacilityId, RequirementId } from "@/types/enrollment";
 
 import { FacilitySelectionScreen } from "./screens/FacilitySelectionScreen";
@@ -28,6 +31,11 @@ function EnrollmentWorkflowContent() {
   const [resetRequested, setResetRequested] = useState(false);
   const previousScreen = useRef(state.screenId);
   const screenContext = createEnrollmentScreenContext(state);
+  const { syncContext } = useVoiceGuide();
+
+  useEffect(() => {
+    syncContext(screenContext);
+  }, [screenContext, syncContext]);
 
   useEffect(() => {
     document.title = `${screenTitles[state.screenId]} — AksesSuara`;
@@ -143,8 +151,8 @@ function EnrollmentWorkflowContent() {
   return (
     <div
       className="app-shell"
-      data-context-screen={screenContext?.screenId ?? "welcome"}
-      data-context-can-proceed={screenContext?.canProceed ?? false}
+      data-context-screen={screenContext.screenId}
+      data-context-can-proceed={screenContext.canProceed}
     >
       <a className="skip-link" href="#screen-content">Skip to enrollment step</a>
 

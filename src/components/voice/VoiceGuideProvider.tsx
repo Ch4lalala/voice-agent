@@ -16,12 +16,14 @@ import {
   VoiceSessionController,
 } from "@/lib/voice-agent-client";
 import { initialVoiceState, voiceStateReducer } from "@/lib/voice-state";
+import type { EnrollmentScreenContext } from "@/types/enrollment";
 import type { VoiceState } from "@/types/voice";
 
 type VoiceGuideContextValue = {
   state: VoiceState;
   start: () => void;
   end: () => void;
+  syncContext: (context: EnrollmentScreenContext) => void;
 };
 
 const VoiceGuideContext = createContext<VoiceGuideContextValue | null>(null);
@@ -29,10 +31,12 @@ const VoiceGuideContext = createContext<VoiceGuideContextValue | null>(null);
 export function VoiceGuideProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(voiceStateReducer, initialVoiceState);
   const controllerRef = useRef<VoiceSessionController | null>(null);
+  const latestContextRef = useRef<EnrollmentScreenContext | null>(null);
 
   useEffect(() => {
     const controller = new VoiceSessionController(createBrowserVoiceRuntime(), dispatch);
     controllerRef.current = controller;
+    if (latestContextRef.current) controller.updateContext(latestContextRef.current);
 
     const endForPageExit = () => controller.dispose();
     window.addEventListener("pagehide", endForPageExit);
@@ -52,7 +56,15 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
 
   const end = useCallback(() => controllerRef.current?.end(), []);
 
-  const value = useMemo(() => ({ state, start, end }), [end, start, state]);
+  const syncContext = useCallback((context: EnrollmentScreenContext) => {
+    latestContextRef.current = context;
+    controllerRef.current?.updateContext(context);
+  }, []);
+
+  const value = useMemo(
+    () => ({ state, start, end, syncContext }),
+    [end, start, state, syncContext],
+  );
 
   return <VoiceGuideContext.Provider value={value}>{children}</VoiceGuideContext.Provider>;
 }

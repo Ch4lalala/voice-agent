@@ -112,7 +112,7 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
 
       <p id={noteId} className="voice-guide__note">
         Microphone access starts only when you choose Start. Voice content is not saved. Voice
-        cannot control or read this enrollment step.
+        can explain this screen but cannot control, validate, or navigate the enrollment workflow.
       </p>
     </aside>
   );

@@ -41,7 +41,7 @@ describe("AksesSuara interface boundaries", () => {
     expect(`${page}\n${workflow}`).not.toMatch(/searchParams|\?screen=|PreviewNavigation/);
   });
 
-  it("keeps product source free from persistence and Phase 4 screen awareness", () => {
+  it("keeps product source free from persistence and Phase 5 tool behavior", () => {
     const productSource = [
       "src/app/page.tsx",
       "src/components/voice/VoiceGuide.tsx",
@@ -49,6 +49,7 @@ describe("AksesSuara interface boundaries", () => {
       "src/components/enrollment/EnrollmentWorkflow.tsx",
       "src/lib/enrollment-machine.ts",
       "src/lib/enrollment-context.ts",
+      "src/lib/voice-context.ts",
       "src/lib/voice-agent-client.ts",
     ]
       .map(readProjectFile)
@@ -64,6 +65,6 @@ describe("AksesSuara interface boundaries", () => {
     ]
       .map(readProjectFile)
       .join("\n");
-    expect(voiceSource).not.toMatch(/EnrollmentScreenContext|data-context-|tool\.result/i);
+    expect(voiceSource).not.toMatch(/tool\.call|tool\.result|highlight_field|go_to_next_step/i);
   });
 });

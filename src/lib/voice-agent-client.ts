@@ -1,3 +1,5 @@
+import { createVoiceContextSnapshot, voiceAgentPromptBaseline } from "@/lib/voice-context";
+import type { EnrollmentScreenContext } from "@/types/enrollment";
 import type { VoiceClientEvent, VoiceErrorCode } from "@/types/voice";
 
 const VOICE_WEBSOCKET_URL = "wss://agents.assemblyai.com/v1/ws";
@@ -7,7 +9,7 @@ export const voiceSessionConfiguration = {
   type: "session.update",
   session: {
     system_prompt:
-      "You are AksesSuara, a calm English voice guide in an independent hackathon prototype. Hold a brief general conversation in plain English, using one or two short sentences at a time. You do not know the current screen and cannot navigate, validate, choose, submit, or call tools. Do not ask for or repeat identification numbers, Family Card numbers, phone numbers, medical details, or other sensitive data. If the user mentions enrollment, tell them to use the visible manual controls. Never claim official BPJS Kesehatan affiliation or provide medical, legal, or eligibility advice.",
+      voiceAgentPromptBaseline,
     greeting:
       "Hello. I’m AksesSuara. We can have a short conversation while you use the on-screen controls yourself.",
     tools: [],
@@ -91,12 +93,26 @@ export class VoiceSessionController {
   private socket: VoiceSocket | null = null;
   private audio: VoiceAudioSession | null = null;
   private abortController: AbortController | null = null;
-  private sessionReady = false;
+  private providerSessionReady = false;
+  private guidanceReady = false;
+  private initialConfigurationPending = false;
+  private latestContext: ReturnType<typeof createVoiceContextSnapshot> | null = null;
+  private contextUpdateInFlight: ReturnType<typeof createVoiceContextSnapshot> | null = null;
+  private appliedContextKey: string | null = null;
 
   constructor(
     private readonly runtime: VoiceRuntime,
     private readonly emit: (event: VoiceClientEvent) => void,
   ) {}
+
+  updateContext(context: EnrollmentScreenContext): boolean {
+    const snapshot = createVoiceContextSnapshot(context);
+    if (snapshot.semanticKey === this.latestContext?.semanticKey) return false;
+
+    this.latestContext = snapshot;
+    this.sendLatestContextIfReady();
+    return true;
+  }
 
   async start(): Promise<boolean> {
     if (this.phase !== "idle") return false;
@@ -118,7 +134,7 @@ export class VoiceSessionController {
       if (!this.isCurrent(generation)) return false;
 
       const audioSession = await this.runtime.createAudioSession(stream, (audio) => {
-        if (!this.isCurrent(generation) || !this.sessionReady) return;
+        if (!this.isCurrent(generation) || !this.guidanceReady) return;
         this.send({ type: "input.audio", audio });
       });
       if (!this.isCurrent(generation)) {
@@ -131,6 +147,7 @@ export class VoiceSessionController {
       this.socket = socket;
       socket.onopen = () => {
         if (!this.isCurrent(generation)) return;
+        this.initialConfigurationPending = true;
         this.send(voiceSessionConfiguration);
       };
       socket.onmessage = (event) => this.handleMessage(generation, event.data);
@@ -174,8 +191,11 @@ export class VoiceSessionController {
 
     switch (message.type) {
       case "session.ready":
-        this.sessionReady = true;
-        this.emit({ type: "SESSION_READY" });
+        this.providerSessionReady = true;
+        this.sendLatestContextIfReady();
+        break;
+      case "session.updated":
+        this.handleSessionUpdated();
         break;
       case "input.speech.started":
         this.audio?.interrupt();
@@ -238,7 +258,11 @@ export class VoiceSessionController {
   private releaseResources(): void {
     this.abortController?.abort();
     this.abortController = null;
-    this.sessionReady = false;
+    this.providerSessionReady = false;
+    this.guidanceReady = false;
+    this.initialConfigurationPending = false;
+    this.contextUpdateInFlight = null;
+    this.appliedContextKey = null;
 
     const socket = this.socket;
     this.socket = null;
@@ -256,6 +280,48 @@ export class VoiceSessionController {
 
     if (this.stream) stopStream(this.stream);
     this.stream = null;
+  }
+
+  private handleSessionUpdated(): void {
+    if (this.initialConfigurationPending) {
+      this.initialConfigurationPending = false;
+      this.sendLatestContextIfReady();
+      return;
+    }
+
+    if (!this.contextUpdateInFlight) return;
+
+    this.appliedContextKey = this.contextUpdateInFlight.semanticKey;
+    this.contextUpdateInFlight = null;
+
+    if (this.latestContext?.semanticKey !== this.appliedContextKey) {
+      this.sendLatestContextIfReady();
+      return;
+    }
+
+    if (!this.guidanceReady) {
+      this.guidanceReady = true;
+      this.emit({ type: "SESSION_READY" });
+    }
+  }
+
+  private sendLatestContextIfReady(): void {
+    if (
+      this.phase !== "active" ||
+      !this.providerSessionReady ||
+      this.initialConfigurationPending ||
+      this.contextUpdateInFlight ||
+      !this.latestContext ||
+      this.latestContext.semanticKey === this.appliedContextKey
+    ) {
+      return;
+    }
+
+    this.contextUpdateInFlight = this.latestContext;
+    this.send({
+      type: "session.update",
+      session: { system_prompt: this.latestContext.systemPrompt },
+    });
   }
 }
 

@@ -117,6 +117,7 @@ describe("deterministic enrollment state machine", () => {
     const familyState: EnrollmentState = {
       ...state,
       screenId: "family-information",
+      data: { ...state.data, relationship: "" },
       errors: { relationship: "Choose the participant’s relationship." },
     };
     const context = createEnrollmentScreenContext(familyState);
@@ -126,7 +127,7 @@ describe("deterministic enrollment state machine", () => {
       { id: "familyCardNumber", complete: true, sensitive: true, error: null },
       {
         id: "relationship",
-        complete: true,
+        complete: false,
         sensitive: false,
         error: "Choose the participant’s relationship.",
       },

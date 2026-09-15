@@ -7,6 +7,8 @@ import {
   type VoiceRuntime,
   type VoiceSocket,
 } from "../src/lib/voice-agent-client";
+import { createEnrollmentScreenContext } from "../src/lib/enrollment-context";
+import { enrollmentReducer, createInitialEnrollmentState } from "../src/lib/enrollment-machine";
 import type { VoiceClientEvent } from "../src/types/voice";
 
 function deferred<T>() {
@@ -44,6 +46,20 @@ function createHarness(overrides: Partial<VoiceRuntime> = {}) {
   const events: VoiceClientEvent[] = [];
   const controller = new VoiceSessionController(runtime, (event) => events.push(event));
   return { audio, controller, events, runtime, socket, stop, stream };
+}
+
+const welcomeContext = createEnrollmentScreenContext(createInitialEnrollmentState());
+const requirementsContext = createEnrollmentScreenContext(
+  enrollmentReducer(createInitialEnrollmentState(), { type: "START_MANUAL" }),
+);
+
+async function makeGuidanceReady(harness: ReturnType<typeof createHarness>) {
+  harness.controller.updateContext(welcomeContext);
+  await harness.controller.start();
+  harness.socket.onopen?.();
+  harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.ready" }) });
+  harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+  harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
 }
 
 describe("VoiceSessionController", () => {
@@ -108,8 +124,7 @@ describe("VoiceSessionController", () => {
 
   it("maps real server events to lifecycle and live-caption events", async () => {
     const harness = createHarness();
-    await harness.controller.start();
-    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.ready" }) });
+    await makeGuidanceReady(harness);
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "input.speech.started" }) });
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "transcript.user", text: "Hello" }) });
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "input.speech.stopped" }) });
@@ -129,6 +144,128 @@ describe("VoiceSessionController", () => {
       { type: "REPLY_DONE" },
     ]);
     expect(harness.audio.play).toHaveBeenCalledWith("AA==");
+    harness.controller.dispose();
+  });
+
+  it("suppresses duplicate semantic context updates", async () => {
+    const harness = createHarness();
+    expect(harness.controller.updateContext(requirementsContext)).toBe(true);
+    expect(harness.controller.updateContext({ ...requirementsContext })).toBe(false);
+
+    await harness.controller.start();
+    harness.socket.onopen?.();
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.ready" }) });
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+
+    expect(harness.socket.send).toHaveBeenCalledTimes(2);
+    expect(harness.controller.updateContext(requirementsContext)).toBe(false);
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+    expect(harness.events).toContainEqual({ type: "SESSION_READY" });
+    expect(harness.socket.send).toHaveBeenCalledTimes(2);
+    harness.controller.dispose();
+  });
+
+  it("does not send context updates for incomplete keystrokes with unchanged semantics", () => {
+    const harness = createHarness();
+    const family = {
+      ...createInitialEnrollmentState(),
+      screenId: "family-information" as const,
+    };
+    const oneDigit = enrollmentReducer(family, {
+      type: "UPDATE_FIELD",
+      fieldId: "familyCardNumber",
+      value: "3",
+    });
+    const twoDigits = enrollmentReducer(oneDigit, {
+      type: "UPDATE_FIELD",
+      fieldId: "familyCardNumber",
+      value: "32",
+    });
+
+    expect(
+      harness.controller.updateContext(createEnrollmentScreenContext(oneDigit)),
+    ).toBe(true);
+    expect(
+      harness.controller.updateContext(createEnrollmentScreenContext(twoDigits)),
+    ).toBe(false);
+  });
+
+  it("queues only the latest context until session.ready and configuration acknowledgement", async () => {
+    const harness = createHarness();
+    harness.controller.updateContext(welcomeContext);
+    harness.controller.updateContext(requirementsContext);
+
+    await harness.controller.start();
+    harness.socket.onopen?.();
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.ready" }) });
+    expect(harness.socket.send).toHaveBeenCalledTimes(1);
+
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+    expect(harness.socket.send).toHaveBeenCalledTimes(2);
+    const update = JSON.parse(
+      String(vi.mocked(harness.socket.send).mock.calls[1][0]),
+    ) as { session: { system_prompt: string } };
+    expect(update.session.system_prompt).toContain("Screen identifier: requirements");
+    expect(update.session.system_prompt).not.toContain("Screen identifier: welcome");
+    harness.controller.dispose();
+  });
+
+  it("serializes rapid updates so stale context cannot overtake the latest context", async () => {
+    const harness = createHarness();
+    await makeGuidanceReady(harness);
+    const familyState = {
+      ...createInitialEnrollmentState(),
+      screenId: "family-information" as const,
+    };
+    const participantState = {
+      ...createInitialEnrollmentState(),
+      screenId: "participant-information" as const,
+    };
+
+    harness.controller.updateContext(createEnrollmentScreenContext(familyState));
+    harness.controller.updateContext(createEnrollmentScreenContext(participantState));
+    expect(harness.socket.send).toHaveBeenCalledTimes(3);
+
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+    expect(harness.socket.send).toHaveBeenCalledTimes(4);
+    const latest = JSON.parse(
+      String(vi.mocked(harness.socket.send).mock.calls[3][0]),
+    ) as { session: { system_prompt: string } };
+    expect(latest.session.system_prompt).toContain(
+      "Screen identifier: participant-information",
+    );
+
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.updated" }) });
+    expect(harness.socket.send).toHaveBeenCalledTimes(4);
+    harness.controller.dispose();
+  });
+
+  it("does not mutate enrollment state while synchronizing context", async () => {
+    const harness = createHarness();
+    const state = enrollmentReducer(createInitialEnrollmentState(), {
+      type: "START_MANUAL",
+    });
+    const before = JSON.stringify(state);
+
+    harness.controller.updateContext(createEnrollmentScreenContext(state));
+
+    expect(JSON.stringify(state)).toBe(before);
+    harness.controller.dispose();
+  });
+
+  it("keeps every session update free of agent tool definitions", async () => {
+    const harness = createHarness();
+    await makeGuidanceReady(harness);
+
+    const messages = vi.mocked(harness.socket.send).mock.calls.map(([raw]) =>
+      JSON.parse(String(raw)) as { session?: { tools?: unknown; system_prompt?: string } },
+    );
+    expect(messages[0].session?.tools).toEqual([]);
+    expect(messages[1].session).toEqual({
+      system_prompt: expect.any(String),
+    });
+    expect(messages.every((message) => message.session?.tools === undefined || Array.isArray(message.session.tools))).toBe(true);
     harness.controller.dispose();
   });
 });

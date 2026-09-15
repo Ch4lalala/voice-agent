@@ -7,10 +7,10 @@ Last updated: September 15, 2026
 - **Phase 0 — Repository audit and foundation:** Complete
 - **Phase 1 — Static product interface:** Complete
 - **Phase 2 — Deterministic enrollment workflow:** Complete
-- **Phase 3 — Basic AssemblyAI voice connection:** Implementation complete; live verification blocked
-- **Phase 4 — Screen-context synchronization:** Not started
+- **Phase 3 — Basic AssemblyAI voice connection:** Complete
+- **Phase 4 — Screen-context synchronization:** Implementation and automated verification complete; live verification pending
 
-Phase 3 code and automated verification are implemented, and the configured credential now successfully mints a minimized temporary-token response. Phase 3 is **not marked complete** because this execution environment cannot provide real microphone input or verify audible browser playback; the required human-observed live conversation is still pending. The deterministic Phase 2 enrollment remains fully usable without voice. The Voice Guide does not receive enrollment context, expose tools, or control the workflow.
+Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 now synchronizes deterministic, sanitized screen semantics into the active voice session without tools or enrollment mutations. Phase 4 is not marked complete until the required three-screen live conversation is verified with a real microphone.
 
 ## Repository condition before Phase 0
 
@@ -273,14 +273,84 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 - This execution environment has no physical microphone or interactive audio output, so it cannot truthfully perform the required spoken sentence or verify audible playback. The application was left running for manual browser verification.
 - No implementation defect was observed and no source code was changed. Phase 4 remains untouched.
 
-## Phase 3 blockers and assumptions
+## Phase 3 manual live verification
 
-- **Completion blocker:** a person must complete the short browser session with a real microphone and confirm `session.ready`, the user caption, a real agent response with audible playback and an agent caption, event-derived lifecycle changes, and clean resource shutdown. The local credential and temporary-token route are now verified. Phase 3 remains incomplete until the manual observations are reported.
+- The user completed the required short real AssemblyAI browser session and reported that the Phase 3 manual checklist passed.
+- The live WebSocket reached `session.ready`; the spoken user sentence and real agent response appeared as captions; agent audio played; and lifecycle states followed real voice events.
+- End Guidance closed the WebSocket cleanly, stopped microphone capture, released audio resources, and left enrollment state unchanged.
+- The verified browser-visible token response exposed only the temporary token, and no permanent AssemblyAI API key was observed in browser-visible responses, rendered HTML, client bundles, console output, or application logs.
+- Phase 3 is complete. No Phase 4 behavior was part of this verification.
+
+## Phase 3 assumptions
+
+- No Phase 3 blocker remains.
 - No `ASSEMBLYAI_AGENT_ID` is required for the current inline session configuration. The empty placeholder remains in `.env.example` only for a possible future stored-agent configuration.
 - The provider's short maximum session duration is deliberate to limit accidental credit use during this hackathon MVP.
 - Chromium was downloaded into the user's Playwright cache for responsive browser verification. Playwright was not added to the project manifest or lockfile.
 - Expected HTTP 503 resource messages appeared in the browser console only during the deliberate missing-credential failure test; the UI handled the response and did not expose an upstream body or credential.
 
+## Repository condition before Phase 4
+
+- The repository was on `main` and tracked `main...origin/main`; no branch operation was performed.
+- The worktree was clean before the administrative Phase 3 status update and Phase 4 implementation began.
+- Phase 3's real microphone session, live captions/audio, event-derived lifecycle, cleanup, and credential-leakage checklist were reported as passed by the user.
+- npm remained the established package manager. No dependency or lockfile change was required.
+- `.env.local` remained ignored and its contents were not displayed, copied, or modified.
+
+## Phase 4 implementation
+
+- Extended the existing deterministic `EnrollmentScreenContext` to cover all six screens, including Welcome, with allowlisted screen identifiers, human-readable titles, step position, predefined field labels and descriptions, required/completion state, deterministic visible errors, sensitivity flags, informational manual actions, and `canProceed`.
+- Date of birth is explicitly marked sensitive for voice context. Context and prompt serialization contain no form value property, raw Family Card number, raw phone number, date value, full name, credential, token, or arbitrary user-entered text.
+- Visible validation messages are regenerated through the existing deterministic validator when an error is active. Arbitrary strings placed in an error object cannot enter the serialized context or prompt.
+- Added the Section 13.4 prompt baseline adapted for Phase 4: the reducer is authoritative; the project is independent; replies are short; requirements and completion cannot be invented; sensitive information must be typed; and the agent has no tools or UI control.
+- Added explicit prompt behavior for current-screen help, missing information, repeat, confusion, simpler wording, and requests to continue or change screens. Navigation requests are redirected to the named visible manual control.
+- The enrollment workflow publishes sanitized context to the persistent Voice Guide provider. The controller compares stable semantic snapshots, so ordinary keystrokes that do not change completion or error state do not send an update.
+- The initial full AssemblyAI `session.update` still configures the baseline, greeting, audio, and `tools: []`. After `session.ready` and the initial configuration acknowledgement, the latest queued context is sent as a system-prompt-only `session.update` and acknowledged by `session.updated` before microphone audio is forwarded.
+- Only one context update is in flight. Pre-ready changes replace the queued snapshot; changes during an in-flight update retain only the latest desired snapshot; acknowledgements serialize updates so stale state cannot overtake newer state; semantic duplicates are suppressed.
+- Current official AssemblyAI Voice Agent documentation provides no separate conversation-context field for this use case. Unlike the separate Streaming STT `agent_context` feature, Voice Agent screen context is supplied through the documented mutable `session.system_prompt` field. `greeting` and `output` remain immutable after readiness and are never included in Phase 4 updates.
+- Existing lifecycle, captions, playback, permission, retry, cleanup, and manual enrollment behavior remain intact. No persistence, diagnostics, client tools, highlighting, validation calls, selection, or navigation callbacks were added.
+
+## Files created in Phase 4
+
+- `src/lib/voice-context.ts`
+- `tests/voice-context.test.ts`
+
+## Files modified in Phase 4
+
+- `DESIGN.md`
+- `IMPLEMENTATION_STATUS.md`
+- `UX-CONTRACT.md`
+- `premium-ui.json`
+- `src/components/enrollment/EnrollmentWorkflow.tsx`
+- `src/components/voice/VoiceGuide.tsx`
+- `src/components/voice/VoiceGuideProvider.tsx`
+- `src/lib/enrollment-context.ts`
+- `src/lib/voice-agent-client.ts`
+- `src/types/enrollment.ts`
+- `tests/enrollment-machine.test.ts`
+- `tests/static-interface.test.ts`
+- `tests/voice-session-controller.test.ts`
+
+`package.json`, `package-lock.json`, environment configuration, and the Phase 2 validation rules were not changed.
+
+## Phase 4 automated verification results
+
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed 8 files and 41 tests; the Next.js production build compiled successfully with `/api/voice/token` remaining dynamic.
+- Context tests — passed for all six screens, manual navigation, completion changes, deterministic error appearance/resolution, arbitrary-error exclusion, sensitive and user-controlled value exclusion, baseline behavior, and reducer immutability.
+- Controller tests — passed for semantic duplicate suppression, unchanged incomplete keystrokes, latest-only pre-ready queuing, serialized in-flight updates, stale-update prevention, enrollment-state isolation, empty agent tools, and all existing Phase 3 lifecycle/cleanup behavior.
+- Production browser walkthrough — passed all six screens at 320 × 800 and 1440 × 900 with no horizontal overflow, correct first-invalid focus, masking, explicit facility confirmation, zero console errors, and zero external requests while voice remained off.
+- Browser client-bundle inspection — passed using alternate valid dummy sensitive values: entered Family Card and phone values and the server API-key variable name were absent from loaded client scripts; raw sensitive values were absent from Review HTML.
+- Source and build leakage scans — passed: `.next/static` contained no API-key name, mocked test key, or entered sensitive markers; source contained no transcript/token/context logging, browser persistence, client tools, or voice-driven UI operations. `.env.local` remains Git-ignored.
+- `npx --yes -p @google/design.md designmd lint DESIGN.md` — passed with 0 errors and 0 warnings.
+- Frontend premium strict audit — passed with 0 findings.
+- `npm audit --omit=dev` — passed with 0 vulnerabilities.
+- `git diff --check` — passed.
+
+## Phase 4 live-verification blocker
+
+- This execution environment cannot supply a real microphone or verify audible playback. The required short live session on Requirements, Family Information, and Healthcare Facility Selection must be completed manually before Phase 4 can be marked complete.
+- Phase 5 — Verified client-side tools — has not been started. The agent has no tool definitions and cannot mutate, highlight, validate, select, or navigate the enrollment workflow.
+
 ## Next phase
 
-Phase 4 — Screen-context synchronization — has not been started. It must not begin until Phase 3's real-session verification passes and the user gives explicit approval.
+Phase 5 — Verified client-side tools — has not been started and must not begin until Phase 4 live verification passes and the user gives explicit approval.

@@ -3,8 +3,8 @@
 ## Product context
 
 - **Audience:** Indonesian adults who may benefit from a calm, guided enrollment walkthrough, including older adults and people with low digital confidence.
-- **Primary job:** Complete a fictional healthcare enrollment demonstration accurately, with an optional basic voice conversation that cannot control the workflow.
-- **Market and language:** Indonesia-oriented public-service concept; Phase 3 interface, validation, prompt, and captions are English only.
+- **Primary job:** Complete a fictional healthcare enrollment demonstration accurately, with optional screen-aware voice explanations that cannot control the workflow.
+- **Market and language:** Indonesia-oriented public-service concept; the Phase 4 interface, validation, prompt, and captions are English only.
 - **Usage context:** Mobile-first personal devices with desktop support. The interface must remain usable at 320 × 800 and 1440 × 900.
 - **Accessibility target:** WCAG 2.2 AA, keyboard operation, visible focus, adjacent errors, and first-invalid-field focus.
 
@@ -12,11 +12,11 @@
 
 | Domain / scope | Authoritative source | Source type | Reviewed date |
 |---|---|---|---|
-| Phase scope, field rules, privacy, disclaimer, and demo boundary | `AksesSuara-PRD.md` §§1.6, 2.5, 5.2, 5.5, 5.6, 7, 9.2, 16 Phase 2 | Product and technical specification | 2026-09-15 |
-| Browser token, WebSocket, events, audio, and session configuration | Official AssemblyAI Voice Agent API documentation | Current provider documentation | 2026-09-15 |
+| Phase scope, context rules, privacy, disclaimer, and demo boundary | `AksesSuara-PRD.md` §§1.7, 2.5, 10, 13.4, 15, 16 | Product and technical specification | 2026-09-15 |
+| Browser token, WebSocket ordering, mutable system-prompt updates, events, audio, and session configuration | Official AssemblyAI Voice Agent API documentation | Current provider documentation | 2026-09-15 |
 | Visual language and interaction principles | `DESIGN.md` | Project design context | 2026-09-15 |
 
-No real enrollment, submission, identity verification, healthcare decision, or official BPJS Kesehatan integration exists in this phase. AssemblyAI provides only the optional basic voice session.
+No real enrollment, submission, identity verification, healthcare decision, or official BPJS Kesehatan integration exists in this phase. AssemblyAI receives only predefined screen metadata and sanitized completion/validation state for optional voice explanation.
 
 ## Visual contract
 
@@ -34,6 +34,7 @@ No real enrollment, submission, identity verification, healthcare decision, or o
 | Scrollbar | Browser-native global behavior | `globals.css` | No custom geometry | 320 px and 1440 px overflow checks |
 | Voice permission | Explicit Start action plus browser permission prompt | `VoiceGuideProvider.tsx`, `voice-agent-client.ts` | Start, end, retry, and recoverable error only | Controller tests and browser failure checks |
 | Live voice state | AssemblyAI connection and voice events | `voice-state.ts`, `VoiceGuide.tsx` | Off, Connecting, Listening, Thinking, Speaking, Error | Reducer and controller tests |
+| Voice screen context | Deterministic context builder plus serialized session-update controller | `enrollment-context.ts`, `voice-context.ts`, `voice-agent-client.ts` | Sanitized informational context only | Context and controller tests |
 
 ## Component behavior
 
@@ -60,17 +61,20 @@ No real enrollment, submission, identity verification, healthcare decision, or o
 | Reset | Reset Demo, then explicit reset action | Welcome with initial state | Keep my information cancels and restores trigger focus | Welcome heading after reset | PRD Phase 2 |
 | Start voice | Start Voice Guidance | Connecting, then event-derived live state | Permission or connection error with Retry; manual enrollment remains available | Trigger remains in embedded guide | PRD Phase 3 |
 | End voice | End Guidance | Off after explicit session termination and local cleanup | Local cleanup still runs if the connection is unavailable | End control | PRD Phase 3 |
+| Synchronize voice context | Manual screen, completion, or visible-validation change | Latest sanitized prompt acknowledged by AssemblyAI | Duplicate state is suppressed; pre-ready and in-flight changes collapse or serialize to the latest state | No focus change | PRD Phase 4 and §10 |
 
 ## Navigation, feedback, and resilience
 
 - The workflow is a single-page, fixed-order state machine; no query string or route can skip steps.
 - The document title follows the active screen. New screens focus their `<h1>` without scrolling obstruction.
 - Reset confirmation is inline in the header rather than an overlay. It never traps focus.
-- The optional voice connection is the only asynchronous Phase 3 operation. Connecting is visibly busy; permission and connection failures are inline and recoverable. There are no toasts, persistence, autosave, offline writes, or multi-tab synchronization.
+- The optional voice connection and its ordered context acknowledgements are the only asynchronous Phase 4 operations. Connecting is visibly busy until `session.ready` and the latest initial context update are acknowledged; permission and connection failures remain inline and recoverable. There are no toasts, persistence, autosave, offline writes, or multi-tab synchronization.
 - Refresh intentionally creates fresh reducer state and clears all data. This is the PRD-defined privacy behavior, so there is no unsaved-change guard.
 - Voice Guide state is owned by one provider above the changing enrollment screens, so an active session is not duplicated or discarded during step navigation. Microphone access starts only after an explicit Start action.
 - Page exit, provider unmount, explicit End, and irrecoverable connection failure stop all microphone tracks, release audio resources, detach socket handlers, and close the session.
-- Voice state and enrollment state are isolated. A voice failure cannot reset or mutate form data, and no `EnrollmentScreenContext` is sent to AssemblyAI in Phase 3.
+- Voice state and enrollment state remain isolated. The reducer publishes a sanitized `EnrollmentScreenContext`; the voice controller can read and serialize it but has no callback, tool, or event that can mutate enrollment state.
+- The initial full `session.update` configures the prompt baseline, empty tools, input, output, and greeting. After both the initial configuration acknowledgement and `session.ready`, the controller sends the latest context through a mutable system-prompt-only `session.update`. Later semantic changes are serialized one at a time and acknowledged with `session.updated`.
+- Context changes before readiness replace the queued snapshot. Changes during another context update retain only the latest desired snapshot, and duplicate semantic snapshots do not send a WebSocket message. Audio starts only after the initial contextual prompt is acknowledged.
 - Live captions are transient React state and are cleared when the session ends. Audio, captions, tokens, transcripts, and session identifiers are never persisted or logged.
 
 ## Validation and sensitive data
@@ -79,7 +83,8 @@ No real enrollment, submission, identity verification, healthcare decision, or o
 - Validation runs when Continue/Return to review is requested. Once an error is visible, editing that field updates its error deterministically.
 - Family Card Number requires 16 digits. Dummy phone numbers require 10–13 digits beginning with `0`. Date requires a real `YYYY-MM-DD` date from 1900 through 2026. All requirements, relationship, fictional full name, and confirmed facility are required.
 - Family Card Number reveals only its final four digits when blurred. Phone number reveals only its final four digits when blurred (the PRD permits three or four). Focusing restores the original in-memory value for editing without reparsing the mask.
-- Raw sensitive values live only inside the active React reducer state. Screen context contains metadata, completion, and validation state, never field values.
+- Raw sensitive values live only inside the active React reducer state. Screen context contains allowlisted identifiers, predefined labels/descriptions, completion, deterministic visible validation state, sensitivity flags, informational manual actions, and `canProceed`; it never contains field values. Date of birth is also marked sensitive in voice context.
+- Prompt construction interpolates only this deterministic context. Visible errors are regenerated through `validation.ts`, so arbitrary text cannot enter the prompt through an error object.
 - The Review screen renders masked sensitive values. No value is logged, persisted, transmitted, or embedded in context attributes.
 
 ## Verification contract
@@ -88,4 +93,4 @@ No real enrollment, submission, identity verification, healthcare decision, or o
 - Design-context gates: DESIGN.md lint and strict premium UI audit.
 - Runtime matrix: Chrome-compatible browser at approximately 320 × 800 and 1440 × 900.
 - Runtime evidence covers the complete manual flow, blocked transitions, first-error focus, masking after blur, confirmation-before-selection, edit-return, completion, reset, refresh, expected voice-error recovery, microphone cleanup, network responses, and horizontal overflow.
-- Unit/component coverage lives in the enrollment tests plus `tests/voice-state.test.ts`, `tests/voice-session-controller.test.ts`, and `tests/voice-token-route.test.ts`.
+- Unit/component coverage lives in the enrollment tests plus `tests/voice-context.test.ts`, `tests/voice-state.test.ts`, `tests/voice-session-controller.test.ts`, and `tests/voice-token-route.test.ts`.

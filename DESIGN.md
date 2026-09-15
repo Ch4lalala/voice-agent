@@ -116,11 +116,11 @@ Containers use the 1rem card radius. Controls use 0.75rem corners. Pill geometry
 
 ### Visual states
 
-Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, **Speaking**, or **Error** beside a visible status dot. Teal, amber, and coral support the labels but never replace them. Phase 3 derives these states from connection and voice events; it does not use timers or simulated fixtures. Live caption cards stay in the same workflow surface as the active step and explicitly state that their content is not saved.
+Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, **Speaking**, or **Error** beside a visible status dot. Teal, amber, and coral support the labels but never replace them. Real AssemblyAI events derive these states; timers and simulated fixtures do not. Phase 4 synchronizes only predefined, sanitized screen semantics, so the guide can explain the visible step without reading values or controlling the interface. Live caption cards stay in the same workflow surface as the active step and explicitly state that their content is not saved.
 
 ### Buttons and actions
 
-Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Repeat and slower-speech controls remain disabled with nearby explanatory copy because they are outside Phase 3.
+Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Spoken requests to repeat or simplify are handled conversationally; the separate Repeat and slower-speech buttons remain disabled because interactive client tools are Phase 5 scope.
 
 ### Navigation and data display
 
@@ -150,4 +150,4 @@ The product voice is patient, concise, and direct. Labels describe what the user
 - **Do:** Keep validation adjacent, deterministic, and paired with first-invalid-field focus.
 - **Do:** Mask sensitive values outside active editing and on Review.
 - **Don't:** Resemble an official BPJS Kesehatan product or imply official integration.
-- **Don't:** Imply that local completion submits information or that voice can read, validate, or control enrollment fields.
+- **Don't:** Imply that local completion submits information or that voice can read field values, validate entries, or control enrollment fields.
