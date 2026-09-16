@@ -1,4 +1,6 @@
 import { createVoiceContextSnapshot, voiceAgentPromptBaseline } from "@/lib/voice-context";
+import { getVoiceSafetyNotice, sanitizeVoiceCaption } from "@/lib/voice-safety";
+import { voiceToolDefinitions, type VoiceToolCall, type VoiceToolExecution } from "@/lib/voice-tools";
 import type { EnrollmentScreenContext } from "@/types/enrollment";
 import type { VoiceClientEvent, VoiceErrorCode } from "@/types/voice";
 
@@ -12,7 +14,7 @@ export const voiceSessionConfiguration = {
       voiceAgentPromptBaseline,
     greeting:
       "Hello. I’m AksesSuara. We can have a short conversation while you use the on-screen controls yourself.",
-    tools: [],
+    tools: voiceToolDefinitions,
     input: {
       format: { encoding: "audio/pcm" },
       language_codes: ["en"],
@@ -61,6 +63,8 @@ export interface VoiceRuntime {
 
 type ControllerPhase = "idle" | "starting" | "active";
 
+export type VoiceToolHandler = (call: VoiceToolCall) => VoiceToolExecution;
+
 function classifyFailure(error: unknown): VoiceErrorCode {
   if (error instanceof DOMException && error.name === "NotAllowedError") {
     return "permission-denied";
@@ -99,10 +103,14 @@ export class VoiceSessionController {
   private latestContext: ReturnType<typeof createVoiceContextSnapshot> | null = null;
   private contextUpdateInFlight: ReturnType<typeof createVoiceContextSnapshot> | null = null;
   private appliedContextKey: string | null = null;
+  private lastProtocolEvent: string | null = null;
+  private pendingToolCalls: VoiceToolCall[] = [];
+  private handledToolCallIds = new Set<string>();
 
   constructor(
     private readonly runtime: VoiceRuntime,
     private readonly emit: (event: VoiceClientEvent) => void,
+    private readonly handleTool?: VoiceToolHandler,
   ) {}
 
   updateContext(context: EnrollmentScreenContext): boolean {
@@ -166,7 +174,6 @@ export class VoiceSessionController {
   end(): void {
     if (this.phase === "idle") return;
     this.generation += 1;
-    this.send({ type: "session.end" });
     this.releaseResources();
     this.phase = "idle";
     this.emit({ type: "ENDED" });
@@ -198,6 +205,7 @@ export class VoiceSessionController {
         this.handleSessionUpdated();
         break;
       case "input.speech.started":
+        this.lastProtocolEvent = message.type;
         this.audio?.interrupt();
         this.emit({ type: "USER_SPEECH_STARTED" });
         break;
@@ -207,10 +215,20 @@ export class VoiceSessionController {
       case "transcript.user.delta":
       case "transcript.user":
         if (typeof message.text === "string") {
-          this.emit({ type: "USER_TRANSCRIPT", text: message.text });
+          const caption = sanitizeVoiceCaption(
+            message.text,
+            "user",
+            message.type === "transcript.user.delta",
+          );
+          this.emit({ type: "USER_TRANSCRIPT", text: caption.text });
+          if (message.type === "transcript.user") {
+            const notice = getVoiceSafetyNotice(message.text);
+            if (notice) this.emit({ type: "SAFETY_NOTICE", message: notice });
+          }
         }
         break;
       case "reply.started":
+        this.lastProtocolEvent = message.type;
         this.emit({ type: "REPLY_STARTED" });
         break;
       case "reply.audio":
@@ -221,30 +239,31 @@ export class VoiceSessionController {
         break;
       case "transcript.agent":
         if (typeof message.text === "string") {
-          this.emit({ type: "AGENT_TRANSCRIPT", text: message.text });
+          this.emit({
+            type: "AGENT_TRANSCRIPT",
+            text: sanitizeVoiceCaption(message.text, "agent").text,
+          });
         }
         break;
       case "reply.done":
+        this.lastProtocolEvent = message.type;
         if (message.status === "interrupted") this.audio?.interrupt();
+        if (message.status === "interrupted") this.pendingToolCalls = [];
+        else this.flushPendingToolCalls();
         this.emit({ type: "REPLY_DONE" });
         break;
-      case "session.ended":
-        this.finish(generation);
+      case "tool.call":
+        this.queueToolCall(message);
         break;
       case "session.error":
-        this.fail(generation, "connection-failed");
+        this.fail(
+          generation,
+          message.code === "agent_timeout" ? "agent-timeout" : "connection-failed",
+        );
         break;
       default:
         break;
     }
-  }
-
-  private finish(generation: number): void {
-    if (!this.isCurrent(generation)) return;
-    this.generation += 1;
-    this.releaseResources();
-    this.phase = "idle";
-    this.emit({ type: "ENDED" });
   }
 
   private fail(generation: number, code: VoiceErrorCode): void {
@@ -263,6 +282,9 @@ export class VoiceSessionController {
     this.initialConfigurationPending = false;
     this.contextUpdateInFlight = null;
     this.appliedContextKey = null;
+    this.lastProtocolEvent = null;
+    this.pendingToolCalls = [];
+    this.handledToolCallIds.clear();
 
     const socket = this.socket;
     this.socket = null;
@@ -322,6 +344,58 @@ export class VoiceSessionController {
       type: "session.update",
       session: { system_prompt: this.latestContext.systemPrompt },
     });
+  }
+
+  private queueToolCall(message: Record<string, unknown>): void {
+    if (typeof message.call_id !== "string" || typeof message.name !== "string") return;
+    if (this.handledToolCallIds.has(message.call_id)) return;
+
+    this.handledToolCallIds.add(message.call_id);
+    this.pendingToolCalls.push({
+      callId: message.call_id,
+      name: message.name,
+      arguments: message.arguments,
+      expectedContextKey: this.appliedContextKey,
+    });
+    this.flushPendingToolCalls();
+  }
+
+  private flushPendingToolCalls(): void {
+    if (this.lastProtocolEvent !== "reply.done" || !this.pendingToolCalls.length) return;
+
+    while (this.pendingToolCalls.length && this.lastProtocolEvent === "reply.done") {
+      const call = this.pendingToolCalls.shift()!;
+      let execution: VoiceToolExecution;
+      try {
+        execution = this.handleTool
+          ? this.handleTool(call)
+          : {
+              result: {
+                status: "blocked",
+                code: "handler_unavailable",
+                message: "That voice action is temporarily unavailable.",
+              },
+              feedback: "That voice action is temporarily unavailable.",
+            };
+      } catch {
+        execution = {
+          result: {
+            status: "blocked",
+            code: "tool_failed",
+            message: "That voice action could not be completed. Please try again.",
+          },
+          feedback: "That voice action could not be completed.",
+        };
+      }
+
+      this.send({
+        type: "tool.result",
+        call_id: call.callId,
+        result: JSON.stringify(execution.result),
+        is_error: execution.result.status === "blocked",
+      });
+      this.emit({ type: "TOOL_FEEDBACK", message: execution.feedback });
+    }
   }
 }
 

@@ -57,7 +57,7 @@ export function ParticipantInformationScreen({ data, errors, onChange, onNext, o
             type="text"
             inputMode="numeric"
             autoComplete="off"
-            placeholder="1959-04-12"
+            placeholder="YYYY-MM-DD"
             value={data.dateOfBirth}
             onChange={update("dateOfBirth")}
             aria-describedby={`dateOfBirth-hint${errors.dateOfBirth ? " dateOfBirth-error" : ""}`}
@@ -74,7 +74,7 @@ export function ParticipantInformationScreen({ data, errors, onChange, onNext, o
               maxLength={13}
               type="tel"
               inputMode="tel"
-              placeholder="081200000123"
+              placeholder="08xx xxxx xxxx"
               value={data.phoneNumber}
               onChange={(value) => onChange("phoneNumber", value)}
               error={errors.phoneNumber}

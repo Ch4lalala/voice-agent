@@ -5,6 +5,8 @@ export const initialVoiceState: VoiceState = {
   userCaption: "",
   agentCaption: "",
   errorCode: null,
+  toolFeedback: "",
+  safetyNotice: "",
 };
 
 export function voiceStateReducer(
@@ -17,7 +19,14 @@ export function voiceStateReducer(
     case "SESSION_READY":
       return { ...state, status: "listening", errorCode: null };
     case "USER_SPEECH_STARTED":
-      return { ...state, status: "listening", userCaption: "", errorCode: null };
+      return {
+        ...state,
+        status: "listening",
+        userCaption: "",
+        errorCode: null,
+        toolFeedback: "",
+        safetyNotice: "",
+      };
     case "USER_SPEECH_STOPPED":
       return { ...state, status: "thinking", errorCode: null };
     case "REPLY_STARTED":
@@ -30,6 +39,10 @@ export function voiceStateReducer(
       return { ...state, agentCaption: event.text };
     case "REPLY_DONE":
       return { ...state, status: "listening", errorCode: null };
+    case "TOOL_FEEDBACK":
+      return { ...state, toolFeedback: event.message };
+    case "SAFETY_NOTICE":
+      return { ...state, safetyNotice: event.message };
     case "FAILED":
       return { ...state, status: "error", errorCode: event.code };
     case "ENDED":

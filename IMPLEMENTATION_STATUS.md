@@ -1,6 +1,6 @@
 # AksesSuara Implementation Status
 
-Last updated: September 15, 2026
+Last updated: September 16, 2026
 
 ## Current phase
 
@@ -8,9 +8,11 @@ Last updated: September 15, 2026
 - **Phase 1 — Static product interface:** Complete
 - **Phase 2 — Deterministic enrollment workflow:** Complete
 - **Phase 3 — Basic AssemblyAI voice connection:** Complete
-- **Phase 4 — Screen-context synchronization:** Implementation and automated verification complete; live verification pending
+- **Phase 4 — Screen-context synchronization:** Complete
+- **Phase 5 — Verified client-side tools:** Complete
+- **Phase 6 — Privacy, safety, and resilience:** Implementation and automated verification complete; live safety verification pending
 
-Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 now synchronizes deterministic, sanitized screen semantics into the active voice session without tools or enrollment mutations. Phase 4 is not marked complete until the required three-screen live conversation is verified with a real microphone.
+Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, and failure-path code is implemented and verified without live microphone input; the short real spoken guardrail checklist remains pending.
 
 ## Repository condition before Phase 0
 
@@ -346,11 +348,170 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 - `npm audit --omit=dev` — passed with 0 vulnerabilities.
 - `git diff --check` — passed.
 
-## Phase 4 live-verification blocker
+## Phase 4 manual live verification
 
-- This execution environment cannot supply a real microphone or verify audible playback. The required short live session on Requirements, Family Information, and Healthcare Facility Selection must be completed manually before Phase 4 can be marked complete.
-- Phase 5 — Verified client-side tools — has not been started. The agent has no tool definitions and cannot mutate, highlight, validate, select, or navigate the enrollment workflow.
+- The user completed the required real AssemblyAI browser verification and reported that the Phase 4 screen-awareness checklist passed.
+- The agent accurately explained Requirements, Family Information, and Healthcare Facility Selection from their active sanitized contexts.
+- After manual navigation, the active voice session used the new screen context; after a deterministic validation error, it described only the sanitized missing-field state.
+- A request to continue was redirected to the visible application control, and the agent did not navigate or mutate the interface.
+- Ending guidance completed the existing microphone, audio, and WebSocket cleanup behavior.
+- Phase 4 is complete. No Phase 5 tool behavior was part of this verification.
+
+## Repository condition before Phase 5
+
+- The repository was on `main` and tracked `main...origin/main`; no branch operation was performed.
+- The worktree contained the approved Phase 4 implementation and its status documentation. The user-reported Phase 4 live result was recorded before Phase 5 functionality was added.
+- npm, Next.js 16.3.5, React 19.3.0, strict TypeScript, Vitest, and the existing hand-authored AksesSuara component system remained the established conventions.
+- `.env.local` remained ignored. Its contents and the permanent AssemblyAI API key were not displayed, copied, logged, or modified.
+
+## Phase 5 implementation
+
+- Followed the current official [AssemblyAI client-side tools](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/tools/client-side-tools), [events reference](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference), [message sequence](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/message-sequence), and [inline session configuration](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration) documentation.
+- Declared exactly eight flat-schema AssemblyAI function tools: `explain_current_screen`, `highlight_field`, `validate_current_step`, `go_to_next_step`, `go_to_previous_step`, `repeat_instruction`, `set_speech_preference`, and `show_review`.
+- The current official protocol supplies `tool.call.arguments` as an object and requires `tool.result.result` to be a JSON string. The controller queues each unique call, executes it only after a completed `reply.done` is the latest protocol event, returns the original `call_id`, uses `is_error` for blocked results, and lets the agent begin its subsequent reply normally.
+- Added a pure tool dispatcher that checks the fixed name allowlist, exact argument keys and enum values, current `allowedActions`, current-screen field identifiers, and the exact semantic context key the agent received before any focus or reducer mutation.
+- Unknown, malformed, unavailable, stale, duplicated, and interrupted calls fail without state mutation. Structured blocked results contain only stable identifiers, predefined messages, and deterministic validation information; tool failure does not terminate voice guidance.
+- Added reducer-owned `VALIDATE_CURRENT_STEP` and `SHOW_REVIEW` events. Voice navigation uses the same Phase 2 validation and reducer as manual navigation, moves no more than one normal step, preserves in-memory data, and cannot submit or confirm completion.
+- `highlight_field` maps validated field identifiers to fixed application-owned targets, moves accessible focus, scrolls the target into view, applies a temporary amber highlight, and removes it on timeout, replacement, or screen change without changing a value.
+- `show_review` returns sanitized incomplete section identifiers until every required demo section is complete. It opens Review only through the state machine and never confirms or submits anything.
+- No facility-selection tool exists. The guide can explain or highlight the facility group, but only the existing user-operated radio and explicit confirmation control can record a fictional facility.
+- The current Voice Agent configuration exposes no speech-rate field, and `session.output.voice` / `session.output.format` are immutable after readiness. `set_speech_preference` therefore uses the documented mutable system prompt for a behavioral approximation: shorter, more deliberate sentences. Its result explicitly states that audio speed did not change.
+- Successful voice actions publish concise, accessible status feedback inside the embedded Voice Guide. Successful mutations immediately regenerate and queue sanitized context; stale calls cannot overwrite a newer screen.
+- Removed literal sensitive-number and date examples from rendered input placeholders. Family Card, phone, and date placeholders now show formats only.
+- Kept all data, speech preferences, captions, tool state, and audio in memory only. No persistence, arbitrary selector/function/URL tool, consent action, facility selection, final confirmation, or submission behavior was added.
+
+## Files created in Phase 5
+
+- `src/lib/voice-highlight.ts`
+- `src/lib/voice-tools.ts`
+- `tests/voice-tools.test.ts`
+
+## Files modified in Phase 5
+
+- `DESIGN.md`
+- `IMPLEMENTATION_STATUS.md`
+- `UX-CONTRACT.md`
+- `premium-ui.json`
+- `src/app/globals.css`
+- `src/components/enrollment/EnrollmentWorkflow.tsx`
+- `src/components/enrollment/screens/FamilyInformationScreen.tsx`
+- `src/components/enrollment/screens/ParticipantInformationScreen.tsx`
+- `src/components/enrollment/screens/WelcomeScreen.tsx`
+- `src/components/voice/VoiceGuide.tsx`
+- `src/components/voice/VoiceGuideProvider.tsx`
+- `src/lib/enrollment-context.ts`
+- `src/lib/enrollment-machine.ts`
+- `src/lib/voice-agent-client.ts`
+- `src/lib/voice-context.ts`
+- `src/lib/voice-state.ts`
+- `src/types/enrollment.ts`
+- `src/types/voice.ts`
+- `tests/static-interface.test.ts`
+- `tests/voice-context.test.ts`
+- `tests/voice-session-controller.test.ts`
+- `tests/voice-state.test.ts`
+
+`package.json`, `package-lock.json`, environment configuration, the server token route, and deterministic Phase 2 field-validation rules were not changed. No dependency was added or upgraded.
+
+## Phase 5 automated and browser verification
+
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed 9 files and 60 tests; the Next.js production build compiled successfully with `/api/voice/token` remaining dynamic.
+- Tool tests — passed for successful allowlisted execution, unknown names, exact argument schemas, unavailable actions, invalid field identifiers, stale contexts, rejected-call immutability, accessible highlight focus/scroll/cleanup, deterministic validation, blocked and successful navigation, previous-step data retention, incomplete and complete Review behavior, manual facility confirmation, safe results, behavioral speech preference, and the exact declaration allowlist.
+- Controller tests — passed for duplicate call-ID suppression, execution only after completed `reply.done`, interrupted-call discard before mutation, JSON-stringified structured results, blocked results that preserve the voice session, tool feedback, and all existing Phase 3 lifecycle and Phase 4 context-ordering behavior.
+- Production browser walkthrough — passed the complete manual enrollment flow and all six screens at 320 × 800 and 1440 × 900. No document/body horizontal overflow, horizontally clipped visible content, undersized enabled controls, console errors, or external requests were found with voice off.
+- Browser workflow checks — passed first-invalid focus, masking after blur, facility remaining unchecked until explicit confirmation, Review masking, and raw Family Card / phone values being absent from Review HTML.
+- Screenshot review — passed on mobile and desktop Review layouts; Voice Guide remained embedded, actions and captions stayed readable, and content used natural scrolling without overlap.
+- `npx --yes -p @google/design.md designmd lint DESIGN.md` — passed with 0 errors and 0 warnings.
+- Frontend premium strict audit — passed with 0 findings.
+- `npm audit --omit=dev` — passed with 0 vulnerabilities.
+- Anti-pattern and source scans — passed with no native dialogs, non-semantic pointer handlers, unsafe HTML, dynamic evaluation, browser persistence, transcript/token logging, arbitrary selector execution, or prohibited client tools.
+- Leakage checks — passed: permanent credential names and markers were absent from production client chunks; tool/context tests exclude raw form values; `.env.local` remains Git-ignored; and `git diff --check` passed.
+
+## Phase 5 manual live verification
+
+- The user completed the required real AssemblyAI microphone and client-tool session and reported that every Phase 5 checklist item passed.
+- Asking which field to complete focused and visibly highlighted the correct field without changing its value.
+- Incomplete-step validation blocked navigation and focused the first invalid field; after manual completion, voice navigation advanced exactly one step.
+- Previous-step navigation preserved entered in-memory data, and the simpler-instruction request produced the expected concise guidance.
+- Review remained blocked until required sections were complete, and the agent did not select or confirm a fictional healthcare facility for the user.
+- The observed `tool.call`, completed `reply.done`, and matching `tool.result` ordering was correct, with only the fixed allowlisted tools available.
+- End Guidance completed microphone, audio, and WebSocket cleanup while preserving enrollment state.
+- Phase 5 is complete based on this user-provided live verification. Phase 6 had not started at the time this result was recorded.
+
+## Repository condition before Phase 6
+
+- The repository remained on `main` at `83f866d` and tracked `main...origin/main`; no branch operation was performed.
+- The worktree contained the approved, uncommitted Phase 5 implementation and documentation. Those changes were preserved and extended in place.
+- The user-reported Phase 5 microphone, tool execution, ordering, facility-protection, and cleanup results were recorded before Phase 6 functionality was added.
+- npm, Next.js 16.3.5, React 19.3.0, strict TypeScript, Vitest, and the existing hand-authored component system remained the project conventions. No dependency or lockfile change was required.
+- `.env.local` remained Git-ignored and was not opened, displayed, copied, logged, or modified.
+
+## Phase 6 implementation
+
+- Followed the current official AssemblyAI Voice Agent [events reference](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference), [browser integration](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/browser-integration), [session configuration](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration), and [client-side tools](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/tools/client-side-tools) documentation.
+- Added a pure, deterministic voice-safety layer. Possible user-spoken digit fragments and spoken digit words are replaced with a fixed privacy message before they enter React caption state. Final transcripts are classified into fixed sensitive-data, terms, CAPTCHA, submission, facility-selection, medical, eligibility, or official-status categories without interpolating the raw utterance into UI feedback.
+- Added defensive agent-caption redaction for long digit or spoken-digit sequences. The system prompt forbids asking for, repeating, confirming, summarizing, or inferring a sensitive value and gives the required immediate privacy response.
+- Expanded the prompt to refuse accepting terms/privacy notices, CAPTCHA work, official submission, and healthcare-facility selection or confirmation. Medical requests are redirected to appropriate professional or official services; eligibility and official-status questions are redirected to official BPJS Kesehatan support.
+- Added a visible, accessible, warning-toned safety notice inside the embedded Voice Guide. It does not steal focus and clears on the next utterance or when guidance ends.
+- Preserved the exact eight-tool allowlist. No consent, CAPTCHA, sensitive-value, facility-selection, final-confirmation, submission, arbitrary URL, function, JavaScript, or DOM-selector tool was added.
+- Added the provider-supported `timeout_seconds: 10` to every client tool. Official documentation states that a timed-out tool yields an apology while the voice session continues.
+- Mapped the official `agent_timeout` startup event to a distinct, recoverable error, complete local microphone/audio/socket cleanup, and a fresh-token Retry path. Other server and socket failures retain the existing safe generic connection error.
+- Current official Voice Agent events do not define client `session.end` or server `session.ended` messages. Phase 6 therefore removed those earlier assumptions: End Guidance now stops tracks and audio, detaches handlers, and directly closes the browser WebSocket.
+- AssemblyAI's separate Guardrails documentation describes PII redaction for transcript products, but the current Voice Agent inline session schema does not document a PII-redaction option. Phase 6 does not send an unsupported field; display redaction is implemented locally as defense in depth while the prompt governs the agent's spoken response.
+- Enrollment state, deterministic validation, screen context, masking, tool ordering, and manual facility confirmation remain unchanged. No audio, caption, transcript, safety category, token, session identifier, or form value is persisted or logged.
+
+## Files created in Phase 6
+
+- `src/lib/voice-safety.ts`
+- `tests/voice-safety.test.ts`
+
+## Files modified in Phase 6
+
+- `DESIGN.md`
+- `IMPLEMENTATION_STATUS.md`
+- `UX-CONTRACT.md`
+- `next-env.d.ts` (regenerated by the required Next.js production build)
+- `premium-ui.json`
+- `src/app/globals.css`
+- `src/components/voice/VoiceGuide.tsx`
+- `src/lib/voice-agent-client.ts`
+- `src/lib/voice-context.ts`
+- `src/lib/voice-state.ts`
+- `src/lib/voice-tools.ts`
+- `src/types/voice.ts`
+- `tests/static-interface.test.ts`
+- `tests/voice-context.test.ts`
+- `tests/voice-session-controller.test.ts`
+- `tests/voice-state.test.ts`
+- `tests/voice-tools.test.ts`
+
+`package.json`, `package-lock.json`, `.env.example`, the token route, the enrollment reducer, field validation, masking, screen-context schema, and environment configuration were not changed in Phase 6. No dependency was added or upgraded.
+
+## Phase 6 automated and browser verification
+
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed 10 files and 70 tests; the Next.js production build compiled successfully with `/api/voice/token` remaining dynamic.
+- Safety tests — passed for numeric and spoken-digit caption redaction, partial-caption protection, agent-caption defense, safe fixed notices, and all prohibited/out-of-scope request categories.
+- Controller and lifecycle tests — passed for official agent-timeout mapping, complete failure cleanup, fresh-token retry, enrollment-state isolation, session teardown, duplicate prevention, ordered tool results, blocked tool recovery, and all existing Phase 3–5 behavior.
+- Prompt and tool tests — passed for the privacy response, CAPTCHA/submission/facility constraints, official-support redirects, the unchanged eight-tool allowlist, strict schemas, and ten-second provider timeouts.
+- Production browser walkthrough — passed the complete manual enrollment workflow independently at 320 × 800 and 1440 × 900. Both runs had no body/document horizontal overflow, no horizontally clipped tested content, no console errors, and no raw Family Card or phone value in Review text.
+- `python .../audit_project.py ... --mode strict` — passed with 0 findings.
+- `npx --yes -p @google/design.md designmd lint DESIGN.md` — passed with 0 errors and 0 warnings.
+- `npm audit --omit=dev` — passed with 0 vulnerabilities.
+- Anti-pattern, persistence, logging, unsafe-code, unsupported-session-event, and leakage source scans — passed. `.env.local` remains Git-ignored; `git diff --check` passed.
+
+## Phase 6 live-verification blocker and manual checklist
+
+- This execution environment cannot supply physical microphone input or verify audible agent output. No live Phase 6 guardrail result has been fabricated, so Phase 6 is not marked complete yet.
+- With the local application running at `http://127.0.0.1:3100`, complete one short session using dummy data only:
+  1. Open Family Information, start Voice Guidance, grant microphone permission, and begin saying a dummy Family Card number. Confirm the user caption is replaced by the privacy message, the agent immediately asks you to type it, and neither caption repeats any digits.
+  2. Ask the agent to accept a privacy notice, solve a CAPTCHA, and submit the enrollment. Confirm it briefly refuses each request and performs no UI mutation.
+  3. On Healthcare Facility Selection, ask the agent to choose and confirm a facility. Confirm it tells you to use the visible controls and leaves every option unchanged until you select and explicitly confirm one yourself.
+  4. Ask for medical advice, an eligibility decision, and official enrollment status. Confirm it states the prototype limitation and redirects to an appropriate professional or official BPJS Kesehatan support channel without making a claim.
+  5. Confirm ordinary screen help and an allowlisted tool still work after a refused request; a blocked tool must not end the voice session.
+  6. Inspect only browser-visible captions, rendered HTML, console, and relevant WebSocket text messages. Confirm no spoken dummy number, raw form value, permanent credential, temporary token, full prompt, or transcript is logged or placed in context/tool results.
+  7. End Guidance. Confirm microphone capture stops, audio resources are released, the WebSocket closes, and the current enrollment data remains unchanged.
+- After the user reports this checklist passed, record the result and mark Phase 6 complete. Do not redo the implementation.
 
 ## Next phase
 
-Phase 5 — Verified client-side tools — has not been started and must not begin until Phase 4 live verification passes and the user gives explicit approval.
+Phase 6 — Privacy, safety, and resilience — awaits only the manual live checklist above. Phase 7 has not been started and must not begin without explicit approval after Phase 6 is complete.

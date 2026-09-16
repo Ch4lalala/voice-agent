@@ -55,13 +55,14 @@ export function WelcomeScreen({ onContinue }: WelcomeScreenProps) {
             Continue Without Voice
           </button>
           <span id="voice-phase-note" className="action-row__note">
-            Starting voice will ask for microphone access. Voice is optional and cannot control the enrollment.
+            Starting voice will ask for microphone access. Verified voice actions may focus,
+            validate, or move one step; your entries and important choices remain yours.
           </span>
         </div>
 
         <div className="accessibility-note">
           <span className="accessibility-note__icon" aria-hidden="true">Aa</span>
-          <p>Live captions are shown when the service supplies them. Repeat and slower-speech controls remain unavailable in this phase.</p>
+          <p>Live captions are shown when the service supplies them. You can ask the guide to repeat, simplify, or use shorter and more deliberate sentences.</p>
         </div>
 
         <aside className="disclaimer" aria-label="Independent prototype disclaimer">

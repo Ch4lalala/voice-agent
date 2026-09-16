@@ -1,4 +1,8 @@
-import { getFieldError, isStepComplete } from "@/lib/validation";
+import {
+  allRequiredStepsComplete,
+  getFieldError,
+  isStepComplete,
+} from "@/lib/validation";
 import {
   type EnrollmentAllowedAction,
   type EnrollmentData,
@@ -7,6 +11,7 @@ import {
   type EnrollmentScreenId,
   type EnrollmentScreenContext,
   type EnrollmentState,
+  type SpeechPreference,
 } from "@/types/enrollment";
 
 const stepDetails: Record<
@@ -133,25 +138,42 @@ function isFieldComplete(fieldId: EnrollmentFieldId, data: EnrollmentData): bool
   return getFieldError(fieldId, data) === null;
 }
 
-function allowedActionsFor(screenId: EnrollmentScreenId): EnrollmentAllowedAction[] {
+function allowedActionsFor(state: EnrollmentState): EnrollmentAllowedAction[] {
+  const { screenId } = state;
   if (screenId === "welcome") {
-    return ["start_voice_guidance", "continue_without_voice"];
+    return [
+      "explain_current_screen",
+      "go_to_next_step",
+      "repeat_instruction",
+      "set_speech_preference",
+    ];
   }
   if (screenId === "review") {
     return [
-      "previous",
-      "review_information",
-      "edit_section",
-      "confirm_demo_completion",
-      "reset_demo",
+      "explain_current_screen",
+      "go_to_previous_step",
+      "repeat_instruction",
+      "set_speech_preference",
+      "show_review",
     ];
   }
 
-  return ["previous", "continue"];
+  const actions: EnrollmentAllowedAction[] = [
+    "explain_current_screen",
+    "highlight_field",
+    "validate_current_step",
+    "go_to_next_step",
+    "go_to_previous_step",
+    "repeat_instruction",
+    "set_speech_preference",
+  ];
+  if (allRequiredStepsComplete(state.data)) actions.push("show_review");
+  return actions;
 }
 
 export function createEnrollmentScreenContext(
   state: EnrollmentState,
+  speechPreference: SpeechPreference = "normal",
 ): EnrollmentScreenContext {
   const screenId = state.screenId;
   const details = stepDetails[screenId];
@@ -167,11 +189,12 @@ export function createEnrollmentScreenContext(
     step: details.step,
     totalSteps: 5,
     fields,
-    allowedActions: allowedActionsFor(screenId),
+    allowedActions: allowedActionsFor(state),
     canProceed:
       screenId === "welcome" || screenId === "review"
         ? true
         : isStepComplete(screenId, state.data),
+    speechPreference,
   };
 }
 

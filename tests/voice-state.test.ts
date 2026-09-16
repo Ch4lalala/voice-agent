@@ -48,6 +48,30 @@ describe("Voice Guide lifecycle", () => {
     expect(state.agentCaption).toBe("Hello there.");
   });
 
+  it("announces safe tool feedback and clears it on the next user turn", () => {
+    let state = voiceStateReducer(initialVoiceState, {
+      type: "TOOL_FEEDBACK",
+      message: "Family Card Number is focused and highlighted.",
+    });
+    expect(state.toolFeedback).toBe(
+      "Family Card Number is focused and highlighted.",
+    );
+
+    state = voiceStateReducer(state, { type: "USER_SPEECH_STARTED" });
+    expect(state.toolFeedback).toBe("");
+  });
+
+  it("announces a safety response and clears it before the next utterance", () => {
+    let state = voiceStateReducer(initialVoiceState, {
+      type: "SAFETY_NOTICE",
+      message: "Please type sensitive information instead.",
+    });
+    expect(state.safetyNotice).toBe("Please type sensitive information instead.");
+
+    state = voiceStateReducer(state, { type: "USER_SPEECH_STARTED" });
+    expect(state.safetyNotice).toBe("");
+  });
+
   it("does not alter enrollment state after a voice failure", () => {
     const enrollmentState = createInitialEnrollmentState();
     const voiceState = voiceStateReducer(initialVoiceState, {

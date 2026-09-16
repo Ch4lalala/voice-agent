@@ -41,7 +41,7 @@ describe("AksesSuara interface boundaries", () => {
     expect(`${page}\n${workflow}`).not.toMatch(/searchParams|\?screen=|PreviewNavigation/);
   });
 
-  it("keeps product source free from persistence and Phase 5 tool behavior", () => {
+  it("keeps product source free from persistence and prohibited tool behavior", () => {
     const productSource = [
       "src/app/page.tsx",
       "src/components/voice/VoiceGuide.tsx",
@@ -62,9 +62,15 @@ describe("AksesSuara interface boundaries", () => {
       "src/components/voice/VoiceGuide.tsx",
       "src/components/voice/VoiceGuideProvider.tsx",
       "src/lib/voice-agent-client.ts",
+      "src/lib/voice-tools.ts",
     ]
       .map(readProjectFile)
       .join("\n");
-    expect(voiceSource).not.toMatch(/tool\.call|tool\.result|highlight_field|go_to_next_step/i);
+    expect(voiceSource).not.toMatch(
+      /accept_terms|submit_enrollment|select_facility|arbitrary_url|eval\(|new Function/i,
+    );
+    expect(readProjectFile("src/components/voice/VoiceGuide.tsx")).toContain(
+      "voice-safety-notice",
+    );
   });
 });

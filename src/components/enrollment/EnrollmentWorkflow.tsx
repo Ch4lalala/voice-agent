@@ -1,14 +1,23 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { createEnrollmentScreenContext } from "@/lib/enrollment-context";
 import { createInitialEnrollmentState, enrollmentReducer } from "@/lib/enrollment-machine";
+import { applyVoiceFieldHighlight } from "@/lib/voice-highlight";
+import { executeVoiceTool, type VoiceToolCall } from "@/lib/voice-tools";
 import {
   useVoiceGuide,
   VoiceGuideProvider,
 } from "@/components/voice/VoiceGuideProvider";
-import type { EditableFieldId, EnrollmentScreenId, FacilityId, RequirementId } from "@/types/enrollment";
+import type {
+  EditableFieldId,
+  EnrollmentFieldId,
+  EnrollmentScreenId,
+  FacilityId,
+  RequirementId,
+  SpeechPreference,
+} from "@/types/enrollment";
 
 import { FacilitySelectionScreen } from "./screens/FacilitySelectionScreen";
 import { FamilyInformationScreen } from "./screens/FamilyInformationScreen";
@@ -29,9 +38,68 @@ const screenTitles: Record<EnrollmentScreenId, string> = {
 function EnrollmentWorkflowContent() {
   const [state, dispatch] = useReducer(enrollmentReducer, undefined, createInitialEnrollmentState);
   const [resetRequested, setResetRequested] = useState(false);
+  const [speechPreference, setSpeechPreference] = useState<SpeechPreference>("normal");
+  const [highlightRequest, setHighlightRequest] = useState<{
+    fieldId: EnrollmentFieldId;
+    sequence: number;
+  } | null>(null);
   const previousScreen = useRef(state.screenId);
-  const screenContext = createEnrollmentScreenContext(state);
-  const { syncContext } = useVoiceGuide();
+  const stateRef = useRef(state);
+  const speechPreferenceRef = useRef(speechPreference);
+  const screenContext = createEnrollmentScreenContext(state, speechPreference);
+  const { registerToolHandler, syncContext } = useVoiceGuide();
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    speechPreferenceRef.current = speechPreference;
+  }, [speechPreference]);
+
+  const dispatchEnrollment = useCallback((event: Parameters<typeof enrollmentReducer>[1]) => {
+    stateRef.current = enrollmentReducer(stateRef.current, event);
+    dispatch(event);
+  }, []);
+
+  const handleVoiceTool = useCallback(
+    (call: VoiceToolCall) => {
+      const currentState = stateRef.current;
+      const currentPreference = speechPreferenceRef.current;
+      const currentContext = createEnrollmentScreenContext(
+        currentState,
+        currentPreference,
+      );
+      const execution = executeVoiceTool(call, currentState, currentContext);
+      const nextState = execution.nextState ?? currentState;
+      const nextPreference = execution.speechPreference ?? currentPreference;
+
+      if (execution.event && execution.nextState) {
+        dispatchEnrollment(execution.event);
+      }
+      if (execution.speechPreference) {
+        speechPreferenceRef.current = execution.speechPreference;
+        setSpeechPreference(execution.speechPreference);
+      }
+      if (execution.highlightFieldId) {
+        setHighlightRequest((request) => ({
+          fieldId: execution.highlightFieldId!,
+          sequence: (request?.sequence ?? 0) + 1,
+        }));
+      }
+
+      if (nextState !== currentState || nextPreference !== currentPreference) {
+        syncContext(createEnrollmentScreenContext(nextState, nextPreference));
+      }
+      return execution;
+    },
+    [dispatchEnrollment, syncContext],
+  );
+
+  useEffect(() => {
+    registerToolHandler(handleVoiceTool);
+    return () => registerToolHandler(null);
+  }, [handleVoiceTool, registerToolHandler]);
 
   useEffect(() => {
     syncContext(screenContext);
@@ -60,6 +128,26 @@ function EnrollmentWorkflowContent() {
   }, [state.focusRequest]);
 
   useEffect(() => {
+    const request = highlightRequest;
+    if (!request) return;
+
+    const removeHighlight = applyVoiceFieldHighlight(
+      document,
+      request.fieldId,
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    );
+    if (!removeHighlight) return;
+
+    const timeout = window.setTimeout(() => {
+      removeHighlight();
+    }, 5_000);
+    return () => {
+      window.clearTimeout(timeout);
+      removeHighlight();
+    };
+  }, [highlightRequest, state.screenId]);
+
+  useEffect(() => {
     if (state.demoCompleted) document.getElementById("completion-title")?.focus();
   }, [state.demoCompleted]);
 
@@ -68,7 +156,7 @@ function EnrollmentWorkflowContent() {
   }, [resetRequested]);
 
   function updateField(fieldId: EditableFieldId, value: string) {
-    dispatch({ type: "UPDATE_FIELD", fieldId, value });
+    dispatchEnrollment({ type: "UPDATE_FIELD", fieldId, value });
   }
 
   function cancelReset() {
@@ -77,7 +165,9 @@ function EnrollmentWorkflowContent() {
   }
 
   function resetDemo() {
-    dispatch({ type: "RESET" });
+    dispatchEnrollment({ type: "RESET" });
+    setSpeechPreference("normal");
+    setHighlightRequest(null);
     setResetRequested(false);
   }
 
@@ -89,9 +179,9 @@ function EnrollmentWorkflowContent() {
             data={state.data}
             errors={state.errors}
             returningToReview={state.returningToReview}
-            onToggle={(requirementId: RequirementId) => dispatch({ type: "TOGGLE_REQUIREMENT", requirementId })}
-            onPrevious={() => dispatch({ type: "PREVIOUS" })}
-            onNext={() => dispatch({ type: "NEXT" })}
+            onToggle={(requirementId: RequirementId) => dispatchEnrollment({ type: "TOGGLE_REQUIREMENT", requirementId })}
+            onPrevious={() => dispatchEnrollment({ type: "PREVIOUS" })}
+            onNext={() => dispatchEnrollment({ type: "NEXT" })}
           />
         );
       case "family-information":
@@ -101,8 +191,8 @@ function EnrollmentWorkflowContent() {
             errors={state.errors}
             returningToReview={state.returningToReview}
             onChange={updateField}
-            onPrevious={() => dispatch({ type: "PREVIOUS" })}
-            onNext={() => dispatch({ type: "NEXT" })}
+            onPrevious={() => dispatchEnrollment({ type: "PREVIOUS" })}
+            onNext={() => dispatchEnrollment({ type: "NEXT" })}
           />
         );
       case "participant-information":
@@ -112,8 +202,8 @@ function EnrollmentWorkflowContent() {
             errors={state.errors}
             returningToReview={state.returningToReview}
             onChange={updateField}
-            onPrevious={() => dispatch({ type: "PREVIOUS" })}
-            onNext={() => dispatch({ type: "NEXT" })}
+            onPrevious={() => dispatchEnrollment({ type: "PREVIOUS" })}
+            onNext={() => dispatchEnrollment({ type: "NEXT" })}
           />
         );
       case "facility-selection":
@@ -123,11 +213,11 @@ function EnrollmentWorkflowContent() {
             errors={state.errors}
             pendingFacilityId={state.pendingFacilityId}
             returningToReview={state.returningToReview}
-            onRequestConfirmation={(facilityId: FacilityId) => dispatch({ type: "REQUEST_FACILITY_CONFIRMATION", facilityId })}
-            onCancelConfirmation={() => dispatch({ type: "CANCEL_FACILITY_CONFIRMATION" })}
-            onConfirm={() => dispatch({ type: "CONFIRM_FACILITY" })}
-            onPrevious={() => dispatch({ type: "PREVIOUS" })}
-            onNext={() => dispatch({ type: "NEXT" })}
+            onRequestConfirmation={(facilityId: FacilityId) => dispatchEnrollment({ type: "REQUEST_FACILITY_CONFIRMATION", facilityId })}
+            onCancelConfirmation={() => dispatchEnrollment({ type: "CANCEL_FACILITY_CONFIRMATION" })}
+            onConfirm={() => dispatchEnrollment({ type: "CONFIRM_FACILITY" })}
+            onPrevious={() => dispatchEnrollment({ type: "PREVIOUS" })}
+            onNext={() => dispatchEnrollment({ type: "NEXT" })}
           />
         );
       case "review":
@@ -135,16 +225,16 @@ function EnrollmentWorkflowContent() {
           <ReviewScreen
             data={state.data}
             demoCompleted={state.demoCompleted}
-            onPrevious={() => dispatch({ type: "PREVIOUS" })}
-            onEdit={(step) => dispatch({ type: "EDIT_STEP", step })}
+            onPrevious={() => dispatchEnrollment({ type: "PREVIOUS" })}
+            onEdit={(step) => dispatchEnrollment({ type: "EDIT_STEP", step })}
             onReviewInformation={() => document.getElementById("review-summary-heading")?.focus()}
-            onComplete={() => dispatch({ type: "COMPLETE_DEMO" })}
+            onComplete={() => dispatchEnrollment({ type: "COMPLETE_DEMO" })}
             onResetRequest={() => setResetRequested(true)}
           />
         );
       case "welcome":
       default:
-        return <WelcomeScreen onContinue={() => dispatch({ type: "START_MANUAL" })} />;
+        return <WelcomeScreen onContinue={() => dispatchEnrollment({ type: "START_MANUAL" })} />;
     }
   }
 

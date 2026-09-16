@@ -3,7 +3,7 @@
   "sourceRoots": ["src"],
   "locale": "en",
   "canonicalMap": "UX-CONTRACT.md",
-  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "Voice permission", "Live voice state", "Voice screen context"],
+  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "Voice permission", "Live voice state", "Voice screen context", "Voice client tools", "Voice privacy and safety"],
   "ownership": {
     "Select/Listbox": "native",
     "Date": "typed",
@@ -11,10 +11,14 @@
     "Scrollbar": "global stylesheet",
     "Voice permission": "VoiceGuideProvider and browser permission prompt",
     "Live voice state": "AssemblyAI event reducer and embedded VoiceGuide",
-    "Voice screen context": "Deterministic sanitized context and serialized session updates"
+    "Voice screen context": "Deterministic sanitized context and serialized session updates",
+    "Voice client tools": "Strict allowlist dispatcher, reducer events, and fixed field-highlight mapping",
+    "Voice privacy and safety": "Pure caption redactor and fixed safety notice classifier"
   },
   "evidence": {
     "failurePaths": "tests/voice-session-controller.test.ts",
-    "voiceContext": "tests/voice-context.test.ts"
+    "voiceContext": "tests/voice-context.test.ts",
+    "voiceTools": "tests/voice-tools.test.ts",
+    "voiceSafety": "tests/voice-safety.test.ts"
   }
 }

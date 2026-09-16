@@ -116,11 +116,13 @@ Containers use the 1rem card radius. Controls use 0.75rem corners. Pill geometry
 
 ### Visual states
 
-Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, **Speaking**, or **Error** beside a visible status dot. Teal, amber, and coral support the labels but never replace them. Real AssemblyAI events derive these states; timers and simulated fixtures do not. Phase 4 synchronizes only predefined, sanitized screen semantics, so the guide can explain the visible step without reading values or controlling the interface. Live caption cards stay in the same workflow surface as the active step and explicitly state that their content is not saved.
+Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, **Speaking**, or **Error** beside a visible status dot. Teal, amber, and coral support the labels but never replace them. Real AssemblyAI events derive these states; timers and simulated fixtures do not. A fixed, verified client-tool layer may request predefined explanation, focus, validation, one-step navigation, repetition, speech-style, and Review actions, while the application reducer remains authoritative. Phase 6 adds a persistent inline amber privacy/safety notice when live speech appears to contain a sensitive number or a prohibited request. Live caption cards stay in the same workflow surface as the active step, redact sensitive number content before React state, and explicitly state that their content is not saved.
 
 ### Buttons and actions
 
-Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Spoken requests to repeat or simplify are handled conversationally; the separate Repeat and slower-speech buttons remain disabled because interactive client tools are Phase 5 scope.
+Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Successful voice tools create a concise polite status inside the guide. Field focus receives an amber outline that is temporary, keyboard-visible, scroll-aware, and removed on timeout or context change. The separate Repeat and slower-speech buttons remain visual command reminders; the supported Phase 5 path is a spoken request handled by verified tools.
+
+Privacy and prohibited-action notices use the existing warning tokens, visible text, and a symbol so their meaning never depends on color. They remain scoped to the Voice Guide, do not steal focus, and clear when the next user utterance begins or the session ends.
 
 ### Navigation and data display
 
@@ -148,6 +150,9 @@ The product voice is patient, concise, and direct. Labels describe what the user
 - **Do:** Keep visual tokens mapped through root CSS variables and accessible in forced-colors mode.
 - **Do:** Keep the Voice Guide within the same bordered workflow surface as the active form.
 - **Do:** Keep validation adjacent, deterministic, and paired with first-invalid-field focus.
+- **Do:** Validate every voice tool against the current semantic context before changing focus or reducer state.
+- **Do:** Replace possible spoken sensitive values before they enter visible caption state and keep safety responses allowlisted.
 - **Do:** Mask sensitive values outside active editing and on Review.
 - **Don't:** Resemble an official BPJS Kesehatan product or imply official integration.
-- **Don't:** Imply that local completion submits information or that voice can read field values, validate entries, or control enrollment fields.
+- **Don't:** Imply that local completion submits information or that voice can read or change field values, confirm a facility, accept consent, or perform final submission.
+- **Don't:** Echo sensitive numbers in captions, logs, prompts, tool results, or error text.

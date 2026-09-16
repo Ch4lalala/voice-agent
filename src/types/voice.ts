@@ -10,6 +10,7 @@ export type VoiceErrorCode =
   | "permission-denied"
   | "not-supported"
   | "not-configured"
+  | "agent-timeout"
   | "connection-failed";
 
 export interface VoiceState {
@@ -17,6 +18,8 @@ export interface VoiceState {
   userCaption: string;
   agentCaption: string;
   errorCode: VoiceErrorCode | null;
+  toolFeedback: string;
+  safetyNotice: string;
 }
 
 export type VoiceStateEvent =
@@ -29,6 +32,8 @@ export type VoiceStateEvent =
   | { type: "REPLY_AUDIO" }
   | { type: "AGENT_TRANSCRIPT"; text: string }
   | { type: "REPLY_DONE" }
+  | { type: "TOOL_FEEDBACK"; message: string }
+  | { type: "SAFETY_NOTICE"; message: string }
   | { type: "FAILED"; code: VoiceErrorCode }
   | { type: "ENDED" };
 

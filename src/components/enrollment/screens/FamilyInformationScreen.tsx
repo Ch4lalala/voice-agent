@@ -46,7 +46,7 @@ export function FamilyInformationScreen({ data, errors, onChange, onNext, onPrev
             maxLength={16}
             type="text"
             inputMode="numeric"
-            placeholder="3273000000003210"
+            placeholder="0000 0000 0000 0000"
             value={data.familyCardNumber}
             onChange={(value) => onChange("familyCardNumber", value)}
             error={errors.familyCardNumber}

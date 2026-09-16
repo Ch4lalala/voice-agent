@@ -140,6 +140,24 @@ function advance(state: EnrollmentState): EnrollmentState {
   };
 }
 
+function validateCurrentStep(state: EnrollmentState): EnrollmentState {
+  if (state.screenId === "welcome" || state.screenId === "review") return state;
+
+  const step = state.screenId;
+  const errors = validateStep(step, state.data);
+  const firstInvalidField = stepFieldIds[step].find((fieldId) => errors[fieldId]);
+  return {
+    ...state,
+    errors: { ...withoutStepErrors(state.errors, step), ...errors },
+    focusRequest: firstInvalidField
+      ? {
+          fieldId: firstInvalidField,
+          sequence: (state.focusRequest?.sequence ?? 0) + 1,
+        }
+      : null,
+  };
+}
+
 export function enrollmentReducer(
   state: EnrollmentState,
   event: EnrollmentEvent,
@@ -189,6 +207,8 @@ export function enrollmentReducer(
         demoCompleted: false,
       };
     }
+    case "VALIDATE_CURRENT_STEP":
+      return validateCurrentStep(state);
     case "NEXT":
       return advance(state);
     case "PREVIOUS":
@@ -202,6 +222,17 @@ export function enrollmentReducer(
             demoCompleted: false,
             focusRequest: null,
           };
+    case "SHOW_REVIEW":
+      return state.screenId !== "welcome" && allRequiredStepsComplete(state.data)
+        ? {
+            ...state,
+            screenId: "review",
+            pendingFacilityId: null,
+            returningToReview: false,
+            demoCompleted: false,
+            focusRequest: null,
+          }
+        : state;
     case "EDIT_STEP":
       return state.screenId === "review" && allRequiredStepsComplete(state.data)
         ? {

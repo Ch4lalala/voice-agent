@@ -13,6 +13,7 @@ import {
 
 import {
   createBrowserVoiceRuntime,
+  type VoiceToolHandler,
   VoiceSessionController,
 } from "@/lib/voice-agent-client";
 import { initialVoiceState, voiceStateReducer } from "@/lib/voice-state";
@@ -24,6 +25,7 @@ type VoiceGuideContextValue = {
   start: () => void;
   end: () => void;
   syncContext: (context: EnrollmentScreenContext) => void;
+  registerToolHandler: (handler: VoiceToolHandler | null) => void;
 };
 
 const VoiceGuideContext = createContext<VoiceGuideContextValue | null>(null);
@@ -32,9 +34,27 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(voiceStateReducer, initialVoiceState);
   const controllerRef = useRef<VoiceSessionController | null>(null);
   const latestContextRef = useRef<EnrollmentScreenContext | null>(null);
+  const toolHandlerRef = useRef<VoiceToolHandler | null>(null);
 
   useEffect(() => {
-    const controller = new VoiceSessionController(createBrowserVoiceRuntime(), dispatch);
+    const controller = new VoiceSessionController(
+      createBrowserVoiceRuntime(),
+      dispatch,
+      (call) => {
+        const handler = toolHandlerRef.current;
+        if (!handler) {
+          return {
+            result: {
+              status: "blocked",
+              code: "handler_unavailable",
+              message: "That voice action is temporarily unavailable.",
+            },
+            feedback: "That voice action is temporarily unavailable.",
+          };
+        }
+        return handler(call);
+      },
+    );
     controllerRef.current = controller;
     if (latestContextRef.current) controller.updateContext(latestContextRef.current);
 
@@ -61,9 +81,13 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
     controllerRef.current?.updateContext(context);
   }, []);
 
+  const registerToolHandler = useCallback((handler: VoiceToolHandler | null) => {
+    toolHandlerRef.current = handler;
+  }, []);
+
   const value = useMemo(
-    () => ({ state, start, end, syncContext }),
-    [end, start, state, syncContext],
+    () => ({ state, start, end, syncContext, registerToolHandler }),
+    [end, registerToolHandler, start, state, syncContext],
   );
 
   return <VoiceGuideContext.Provider value={value}>{children}</VoiceGuideContext.Provider>;

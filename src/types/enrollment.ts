@@ -75,15 +75,20 @@ export interface EnrollmentFieldContext {
   error: string | null;
 }
 
-export type EnrollmentAllowedAction =
-  | "start_voice_guidance"
-  | "continue_without_voice"
-  | "previous"
-  | "continue"
-  | "review_information"
-  | "edit_section"
-  | "confirm_demo_completion"
-  | "reset_demo";
+export const voiceToolNames = [
+  "explain_current_screen",
+  "highlight_field",
+  "validate_current_step",
+  "go_to_next_step",
+  "go_to_previous_step",
+  "repeat_instruction",
+  "set_speech_preference",
+  "show_review",
+] as const;
+
+export type VoiceToolName = (typeof voiceToolNames)[number];
+export type SpeechPreference = "normal" | "slow";
+export type EnrollmentAllowedAction = VoiceToolName;
 
 export interface EnrollmentScreenContext {
   screenId: EnrollmentScreenId;
@@ -93,6 +98,7 @@ export interface EnrollmentScreenContext {
   fields: EnrollmentFieldContext[];
   allowedActions: EnrollmentAllowedAction[];
   canProceed: boolean;
+  speechPreference: SpeechPreference;
 }
 
 export type EnrollmentEvent =
@@ -102,8 +108,10 @@ export type EnrollmentEvent =
   | { type: "REQUEST_FACILITY_CONFIRMATION"; facilityId: FacilityId }
   | { type: "CANCEL_FACILITY_CONFIRMATION" }
   | { type: "CONFIRM_FACILITY" }
+  | { type: "VALIDATE_CURRENT_STEP" }
   | { type: "NEXT" }
   | { type: "PREVIOUS" }
+  | { type: "SHOW_REVIEW" }
   | { type: "EDIT_STEP"; step: Exclude<EnrollmentStep, "review"> }
   | { type: "COMPLETE_DEMO" }
   | { type: "RESET" };

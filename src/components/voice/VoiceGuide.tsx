@@ -21,6 +21,8 @@ const errorMessages = {
     "This browser cannot start the Voice Guide. You can continue the enrollment manually.",
   "not-configured":
     "Voice guidance is not configured on this server. You can continue the enrollment manually.",
+  "agent-timeout":
+    "The Voice Guide took too long to start. Retry with a fresh connection, or continue manually.",
   "connection-failed":
     "The Voice Guide could not connect. Check your connection and retry, or continue manually.",
 } as const;
@@ -83,6 +85,20 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
         </p>
       ) : null}
 
+      {state.toolFeedback ? (
+        <p className="voice-tool-feedback" role="status">
+          <span aria-hidden="true">✓</span>
+          {state.toolFeedback}
+        </p>
+      ) : null}
+
+      {state.safetyNotice ? (
+        <p className="voice-safety-notice" role="status">
+          <span aria-hidden="true">!</span>
+          {state.safetyNotice}
+        </p>
+      ) : null}
+
       <div className="captions" aria-live="polite" aria-label="Live voice captions">
         <p className="captions__label">Live captions · Not saved</p>
         <div className="caption caption--user">
@@ -112,7 +128,8 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
 
       <p id={noteId} className="voice-guide__note">
         Microphone access starts only when you choose Start. Voice content is not saved. Voice
-        can explain this screen but cannot control, validate, or navigate the enrollment workflow.
+        actions are checked by the application before they can highlight, validate, or move one
+        step. You still enter information and confirm important choices yourself.
       </p>
     </aside>
   );

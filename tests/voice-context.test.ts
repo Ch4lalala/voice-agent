@@ -52,7 +52,9 @@ function statesForEveryScreen(): EnrollmentState[] {
 
 describe("sanitized enrollment context for voice guidance", () => {
   it("creates predefined context for every enrollment screen", () => {
-    const contexts = statesForEveryScreen().map(createEnrollmentScreenContext);
+    const contexts = statesForEveryScreen().map((state) =>
+      createEnrollmentScreenContext(state),
+    );
 
     expect(contexts.map(({ screenId }) => screenId)).toEqual<EnrollmentScreenId[]>([
       "welcome",
@@ -149,11 +151,17 @@ describe("sanitized enrollment context for voice guidance", () => {
 
     expect(snapshot.systemPrompt).toContain("application state machine is authoritative");
     expect(snapshot.systemPrompt).toContain("one short instruction at a time");
-    expect(snapshot.systemPrompt).toContain("no tools and cannot highlight, validate");
-    expect(snapshot.systemPrompt).toContain("use the named visible application control");
-    expect(snapshot.systemPrompt).toContain("If asked to repeat");
+    expect(snapshot.systemPrompt).toContain("Use only the client-side tools");
+    expect(snapshot.systemPrompt).toContain("Never claim an action happened");
+    expect(snapshot.systemPrompt).toContain("call repeat_instruction");
     expect(snapshot.systemPrompt).toContain("simpler language");
+    expect(snapshot.systemPrompt).toContain("please do not say that value aloud");
+    expect(snapshot.systemPrompt).toContain("solve or bypass CAPTCHA");
+    expect(snapshot.systemPrompt).toContain("official BPJS Kesehatan support channels");
     expect(JSON.stringify(state)).toBe(before);
-    expect(voiceSessionConfiguration.session.tools).toEqual([]);
+    expect(voiceSessionConfiguration.session.tools).toHaveLength(8);
+    expect(
+      voiceSessionConfiguration.session.tools.map((tool) => tool.name),
+    ).not.toContain("select_facility");
   });
 });
