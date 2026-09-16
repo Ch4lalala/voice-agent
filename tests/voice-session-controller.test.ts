@@ -11,6 +11,8 @@ import {
 } from "../src/lib/voice-agent-client";
 import { createEnrollmentScreenContext } from "../src/lib/enrollment-context";
 import { enrollmentReducer, createInitialEnrollmentState } from "../src/lib/enrollment-machine";
+import { executeVoiceTool } from "../src/lib/voice-tools";
+import type { EnrollmentState } from "../src/types/enrollment";
 import type { VoiceClientEvent } from "../src/types/voice";
 
 function deferred<T>() {
@@ -59,7 +61,6 @@ function createHarness(
     runtime,
     (event) => events.push(event),
     handleTool,
-    true,
   );
   return {
     audio,
@@ -77,6 +78,24 @@ const welcomeContext = createEnrollmentScreenContext(createInitialEnrollmentStat
 const requirementsContext = createEnrollmentScreenContext(
   enrollmentReducer(createInitialEnrollmentState(), { type: "START_MANUAL" }),
 );
+
+function requirementsWithOnlyEmailIncomplete(): EnrollmentState {
+  return [
+    "identificationCardAvailable",
+    "familyCardAvailable",
+    "phoneNumberAvailable",
+  ].reduce<EnrollmentState>(
+    (state, requirementId) =>
+      enrollmentReducer(state, {
+        type: "TOGGLE_REQUIREMENT",
+        requirementId: requirementId as
+          | "identificationCardAvailable"
+          | "familyCardAvailable"
+          | "phoneNumberAvailable",
+      }),
+    enrollmentReducer(createInitialEnrollmentState(), { type: "START_MANUAL" }),
+  );
+}
 
 async function makeGuidanceReady(harness: ReturnType<typeof createHarness>) {
   harness.controller.updateContext(welcomeContext);
@@ -105,14 +124,6 @@ function acknowledgeLatestContext(harness: ReturnType<typeof createHarness>) {
       config: { system_prompt: systemPrompt },
     }),
   });
-}
-
-function withoutDiagnostics(events: VoiceClientEvent[]): VoiceClientEvent[] {
-  return events.filter(
-    (event) =>
-      event.type !== "LATENCY_METRIC" &&
-      event.type !== "SESSION_CONFIGURATION",
-  );
 }
 
 function endCleanly(harness: ReturnType<typeof createHarness>) {
@@ -203,7 +214,7 @@ describe("VoiceSessionController", () => {
     await expect(harness.controller.start()).resolves.toBe(false);
 
     expect(requestToken).not.toHaveBeenCalled();
-    expect(withoutDiagnostics(harness.events)).toEqual([
+    expect(harness.events).toEqual([
       { type: "FAILED", code: "permission-denied" },
     ]);
   });
@@ -219,7 +230,7 @@ describe("VoiceSessionController", () => {
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "reply.audio", data: "AA==" }) });
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "reply.done", status: "completed" }) });
 
-    expect(withoutDiagnostics(harness.events)).toEqual([
+    expect(harness.events).toEqual([
       { type: "SESSION_READY" },
       { type: "USER_SPEECH_STARTED" },
       { type: "USER_SPEECH_STOPPED" },
@@ -263,11 +274,11 @@ describe("VoiceSessionController", () => {
     harness.socket.onmessage?.({
       data: JSON.stringify({
         type: "transcript.agent",
-        text: "Your number is 081234567890.",
+        text: "Your number is 081200000123.",
       }),
     });
 
-    expect(JSON.stringify(harness.events)).not.toContain("081234567890");
+    expect(JSON.stringify(harness.events)).not.toContain("081200000123");
     expect(harness.events.at(-1)).toEqual({
       type: "AGENT_TRANSCRIPT",
       text: expect.stringContaining("spoken value was hidden"),
@@ -358,11 +369,6 @@ describe("VoiceSessionController", () => {
       }),
     });
     harness.pushAudioChunk();
-    expect(harness.events).toContainEqual({
-      type: "SESSION_CONFIGURATION",
-      transcriptionMode: "min_latency",
-      englishLanguageSteering: true,
-    });
     expect(harness.events).not.toContainEqual({ type: "SESSION_READY" });
 
     harness.socket.onmessage?.({
@@ -528,7 +534,11 @@ describe("VoiceSessionController", () => {
 
   it("executes a tool at most once and sends its result only after reply.done", async () => {
     const handleTool = vi.fn<VoiceToolHandler>().mockReturnValue({
-      result: { status: "success", screenId: "requirements" },
+      result: {
+        status: "success",
+        is_error: false,
+        screenId: "requirements",
+      },
       feedback: "Requirements explained.",
     });
     const harness = createHarness({}, handleTool);
@@ -562,10 +572,12 @@ describe("VoiceSessionController", () => {
     expect(resultMessages).toHaveLength(1);
     expect(JSON.parse(resultMessages[0].result!)).toEqual({
       status: "success",
+      is_error: false,
       screenId: "requirements",
     });
     expect(harness.events).toContainEqual({
       type: "TOOL_FEEDBACK",
+      kind: "success",
       message: "Requirements explained.",
     });
     endCleanly(harness);
@@ -601,6 +613,7 @@ describe("VoiceSessionController", () => {
     const handleTool = vi.fn<VoiceToolHandler>().mockReturnValue({
       result: {
         status: "blocked",
+        is_error: true,
         code: "invalid_arguments",
         message: "That voice action used invalid information and was not applied.",
       },
@@ -622,12 +635,146 @@ describe("VoiceSessionController", () => {
     });
 
     const toolResult = vi.mocked(harness.socket.send).mock.calls
-      .map(([raw]) => JSON.parse(String(raw)) as { type: string; is_error?: boolean })
+      .map(([raw]) => JSON.parse(String(raw)) as { type: string; result?: string; is_error?: boolean })
       .find((message) => message.type === "tool.result");
-    expect(toolResult?.is_error).toBe(true);
+    expect(toolResult).not.toHaveProperty("is_error");
+    expect(JSON.parse(toolResult?.result ?? "{}")).toMatchObject({
+      status: "blocked",
+      is_error: true,
+    });
     harness.socket.onmessage?.({ data: JSON.stringify({ type: "input.speech.started" }) });
     expect(harness.events.at(-1)).toEqual({ type: "USER_SPEECH_STARTED" });
     expect(harness.stop).not.toHaveBeenCalled();
     endCleanly(harness);
+  });
+
+  it("sends one successful incomplete-validation result before its context update", async () => {
+    let state = requirementsWithOnlyEmailIncomplete();
+    const controllerHolder: {
+      current: VoiceSessionController | null;
+    } = { current: null };
+    const handleTool = vi.fn<VoiceToolHandler>().mockImplementation((call) => {
+      const context = createEnrollmentScreenContext(state);
+      const execution = executeVoiceTool(call, state, context);
+      return execution.nextState
+        ? {
+            ...execution,
+            apply: () => {
+              state = execution.nextState!;
+              controllerHolder.current?.updateContext(
+                createEnrollmentScreenContext(state),
+              );
+            },
+          }
+        : execution;
+    });
+    const harness = createHarness({}, handleTool);
+    controllerHolder.current = harness.controller;
+    harness.controller.updateContext(createEnrollmentScreenContext(state));
+    await harness.controller.start();
+    harness.socket.onopen?.();
+    harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "session.ready",
+        config: voiceSessionConfiguration.session,
+      }),
+    });
+    acknowledgeLatestContext(harness);
+    const baselineSendCount = vi.mocked(harness.socket.send).mock.calls.length;
+
+    harness.socket.onmessage?.({ data: JSON.stringify({ type: "reply.started" }) });
+    const toolCall = {
+      type: "tool.call",
+      call_id: "call-validation-email",
+      name: "validate_current_step",
+      arguments: {},
+    };
+    harness.socket.onmessage?.({ data: JSON.stringify(toolCall) });
+    harness.socket.onmessage?.({
+      data: JSON.stringify({ type: "reply.done", status: "completed" }),
+    });
+
+    const messages = vi.mocked(harness.socket.send).mock.calls
+      .slice(baselineSendCount)
+      .map(([raw]) => JSON.parse(String(raw)) as {
+        type: string;
+        call_id?: string;
+        result?: string;
+      });
+    expect(messages.map(({ type }) => type)).toEqual([
+      "tool.result",
+      "session.update",
+    ]);
+    expect(messages[0].call_id).toBe("call-validation-email");
+    expect(JSON.parse(messages[0].result ?? "{}")).toMatchObject({
+      status: "blocked",
+      is_error: false,
+      canProceed: false,
+      missingFieldLabels: ["Email address available or not applicable"],
+      message: "Please complete “Email address available or not applicable”.",
+    });
+    expect(handleTool).toHaveBeenCalledOnce();
+    expect(state.screenId).toBe("requirements");
+    expect(state.data.requirements.emailAddressReady).toBe(false);
+    expect(state.errors.emailAddressReady).toBe(
+      "Confirm that an email address is available or does not apply.",
+    );
+
+    harness.socket.onmessage?.({
+      data: JSON.stringify({ type: "reply.done", status: "completed" }),
+    });
+    harness.socket.onmessage?.({ data: JSON.stringify(toolCall) });
+    expect(handleTool).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(harness.socket.send).mock.calls
+        .map(([raw]) => JSON.parse(String(raw)) as { type: string })
+        .filter(({ type }) => type === "tool.result"),
+    ).toHaveLength(1);
+    endCleanly(harness);
+  });
+
+  it("does not emit a late error result after the provider timeout window", async () => {
+    vi.useFakeTimers();
+    try {
+      const handleTool = vi.fn<VoiceToolHandler>().mockReturnValue({
+        result: {
+          status: "blocked",
+          is_error: false,
+          completionState: "incomplete",
+          canProceed: false,
+          message: "Please complete “Email address available or not applicable”.",
+        },
+        feedback: "Please complete “Email address available or not applicable”.",
+      });
+      const harness = createHarness({}, handleTool);
+      await makeGuidanceReady(harness);
+      harness.socket.onmessage?.({ data: JSON.stringify({ type: "reply.started" }) });
+      harness.socket.onmessage?.({
+        data: JSON.stringify({
+          type: "tool.call",
+          call_id: "call-no-late-timeout",
+          name: "validate_current_step",
+          arguments: {},
+        }),
+      });
+      harness.socket.onmessage?.({
+        data: JSON.stringify({ type: "reply.done", status: "completed" }),
+      });
+      const resultCount = () =>
+        vi.mocked(harness.socket.send).mock.calls.filter(([raw]) =>
+          String(raw).includes('"type":"tool.result"'),
+        ).length;
+
+      expect(resultCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(resultCount()).toBe(1);
+      expect(harness.events).not.toContainEqual({
+        type: "FAILED",
+        code: "agent-timeout",
+      });
+      endCleanly(harness);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

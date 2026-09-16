@@ -19,6 +19,8 @@
     "failurePaths": "tests/voice-session-controller.test.ts",
     "voiceContext": "tests/voice-context.test.ts",
     "voiceTools": "tests/voice-tools.test.ts",
-    "voiceSafety": "tests/voice-safety.test.ts"
+    "voiceSafety": "tests/voice-safety.test.ts",
+    "accessibility": "e2e/enrollment.spec.ts",
+    "acceptanceMatrix": "QA_CHECKLIST.md"
   }
 }

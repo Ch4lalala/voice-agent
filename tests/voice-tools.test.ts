@@ -17,6 +17,7 @@ import {
 import type {
   EnrollmentEvent,
   EnrollmentState,
+  RequirementId,
   SpeechPreference,
 } from "../src/types/enrollment";
 
@@ -35,6 +36,20 @@ function familyState(): EnrollmentState {
   ]);
 }
 
+function requirementsState(
+  completed: RequirementId[],
+): EnrollmentState {
+  return applyEvents(createInitialEnrollmentState(), [
+    { type: "START_MANUAL" },
+    ...completed.map(
+      (requirementId): EnrollmentEvent => ({
+        type: "TOGGLE_REQUIREMENT",
+        requirementId,
+      }),
+    ),
+  ]);
+}
+
 function completeState(screenId: EnrollmentState["screenId"] = "review"): EnrollmentState {
   const review = applyEvents(createInitialEnrollmentState(), [
     { type: "START_MANUAL" },
@@ -45,7 +60,7 @@ function completeState(screenId: EnrollmentState["screenId"] = "review"): Enroll
     { type: "NEXT" },
     { type: "UPDATE_FIELD", fieldId: "fullName", value: "Budi Santoso" },
     { type: "UPDATE_FIELD", fieldId: "dateOfBirth", value: "1959-04-12" },
-    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081234567890" },
+    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081200000123" },
     { type: "NEXT" },
     { type: "REQUEST_FACILITY_CONFIRMATION", facilityId: "taman-sari" },
     { type: "CONFIRM_FACILITY" },
@@ -185,6 +200,7 @@ describe("verified client-side voice tools", () => {
 
     expect(execution.result).toMatchObject({
       status: "blocked",
+      is_error: false,
       code: "validation_failed",
       missingFields: ["familyCardNumber", "relationship"],
     });
@@ -200,7 +216,13 @@ describe("verified client-side voice tools", () => {
     const validation = execute(family, "validate_current_step");
     const navigation = execute(family, "go_to_next_step");
 
-    expect(validation.result).toEqual({ status: "success", canProceed: true });
+    expect(validation.result).toEqual({
+      status: "success",
+      is_error: false,
+      completionState: "complete",
+      canProceed: true,
+      message: "This step is complete.",
+    });
     expect(validation.nextState?.screenId).toBe("family-information");
     expect(navigation.nextState?.screenId).toBe("participant-information");
     expect(createEnrollmentScreenContext(navigation.nextState!).screenId).toBe(
@@ -247,13 +269,111 @@ describe("verified client-side voice tools", () => {
     );
   });
 
+  it("reports exactly one incomplete Requirement as a successful expected state", () => {
+    const state = requirementsState([
+      "identificationCardAvailable",
+      "familyCardAvailable",
+      "phoneNumberAvailable",
+    ]);
+    const before = JSON.stringify(state.data.requirements);
+    const execution = execute(state, "validate_current_step");
+
+    expect(execution.result).toMatchObject({
+      status: "blocked",
+      is_error: false,
+      completionState: "incomplete",
+      canProceed: false,
+      missingFields: ["emailAddressReady"],
+      missingFieldLabels: ["Email address available or not applicable"],
+      message: "Please complete “Email address available or not applicable”.",
+    });
+    expect(execution.feedback).toBe(
+      "Please complete “Email address available or not applicable”.",
+    );
+    expect(JSON.stringify(execution.result)).not.toMatch(
+      /encountered an error|please try checking/i,
+    );
+    expect(execution.nextState?.screenId).toBe("requirements");
+    expect(execution.nextState?.data.requirements).toEqual(state.data.requirements);
+    expect(JSON.stringify(state.data.requirements)).toBe(before);
+  });
+
+  it("reports multiple incomplete Requirements without mutating or navigating", () => {
+    const state = requirementsState(["identificationCardAvailable"]);
+    const execution = execute(state, "validate_current_step");
+
+    expect(execution.result).toMatchObject({
+      status: "blocked",
+      is_error: false,
+      completionState: "incomplete",
+      canProceed: false,
+      missingFields: [
+        "familyCardAvailable",
+        "phoneNumberAvailable",
+        "emailAddressReady",
+      ],
+      missingFieldLabels: [
+        "Family Card available",
+        "Active phone number available",
+        "Email address available or not applicable",
+      ],
+    });
+    expect(execution.nextState?.screenId).toBe("requirements");
+    expect(execution.nextState?.data.requirements).toEqual(state.data.requirements);
+  });
+
+  it("reports a complete Requirements step as a successful result", () => {
+    const state = requirementsState([
+      "identificationCardAvailable",
+      "familyCardAvailable",
+      "phoneNumberAvailable",
+      "emailAddressReady",
+    ]);
+    const execution = execute(state, "validate_current_step");
+
+    expect(execution.result).toEqual({
+      status: "success",
+      is_error: false,
+      completionState: "complete",
+      canProceed: true,
+      message: "This step is complete.",
+    });
+    expect(execution.nextState?.screenId).toBe("requirements");
+    expect(execution.nextState?.data.requirements).toEqual(state.data.requirements);
+  });
+
+  it("marks every successful tool behavior as a non-error result", () => {
+    const completeFamily = applyEvents(familyState(), [
+      { type: "UPDATE_FIELD", fieldId: "familyCardNumber", value: "3273000000003210" },
+      { type: "UPDATE_FIELD", fieldId: "relationship", value: "self" },
+    ]);
+    const participant = completeState("participant-information");
+    const executions = [
+      execute(familyState(), "explain_current_screen"),
+      execute(familyState(), "highlight_field", { fieldId: "familyCardNumber" }),
+      execute(completeFamily, "validate_current_step"),
+      execute(completeFamily, "go_to_next_step"),
+      execute(participant, "go_to_previous_step"),
+      execute(familyState(), "repeat_instruction", { mode: "same" }),
+      execute(familyState(), "repeat_instruction", { mode: "simpler" }),
+      execute(familyState(), "set_speech_preference", { pace: "slow" }),
+      execute(participant, "show_review"),
+    ];
+
+    expect(executions.every(({ result }) => result.is_error === false)).toBe(true);
+  });
+
   it("returns only sanitized identifiers and never raw form values", () => {
     const state = completeState("family-information");
-    const result = JSON.stringify(execute(state, "explain_current_screen").result);
+    const result = JSON.stringify([
+      execute(state, "explain_current_screen").result,
+      execute(state, "validate_current_step").result,
+      execute(state, "go_to_next_step").result,
+    ]);
 
     for (const value of [
       "3273000000003210",
-      "081234567890",
+      "081200000123",
       "Budi Santoso",
       "1959-04-12",
     ]) {
@@ -292,5 +412,10 @@ describe("verified client-side voice tools", () => {
     expect(voiceToolDefinitions.every((tool) => tool.timeout_seconds === 10)).toBe(
       true,
     );
+    expect(
+      voiceToolDefinitions.every(
+        (tool) => !("response_instructions" in tool),
+      ),
+    ).toBe(true);
   });
 });

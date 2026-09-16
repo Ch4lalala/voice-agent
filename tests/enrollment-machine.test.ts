@@ -26,7 +26,7 @@ function completeEnrollment(): EnrollmentState {
     { type: "NEXT" },
     { type: "UPDATE_FIELD", fieldId: "fullName", value: "Budi Santoso" },
     { type: "UPDATE_FIELD", fieldId: "dateOfBirth", value: "1959-04-12" },
-    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081234567890" },
+    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081200000123" },
     { type: "NEXT" },
     { type: "REQUEST_FACILITY_CONFIRMATION", facilityId: "taman-sari" },
     { type: "CONFIRM_FACILITY" },
@@ -69,7 +69,7 @@ describe("deterministic enrollment state machine", () => {
     const staleUpdate = enrollmentReducer(requirements, {
       type: "UPDATE_FIELD",
       fieldId: "phoneNumber",
-      value: "081234567890",
+      value: "081200000123",
     });
 
     expect(staleUpdate).toBe(requirements);
@@ -108,8 +108,8 @@ describe("deterministic enrollment state machine", () => {
 
   it("masks sensitive values while preserving only the visible tail", () => {
     expect(maskSensitiveValue("3273000000003210", 4)).toBe("•••• •••• •••• 3210");
-    expect(maskSensitiveValue("081234567890", 4)).toBe("•••• •••• 7890");
-    expect(maskSensitiveValue("081234567890", 3)).toBe("•••• •••• •890");
+    expect(maskSensitiveValue("081200000123", 4)).toBe("•••• •••• 0123");
+    expect(maskSensitiveValue("081200000123", 3)).toBe("•••• •••• •123");
   });
 
   it("sanitizes screen context without exposing field values", () => {
@@ -133,7 +133,7 @@ describe("deterministic enrollment state machine", () => {
       },
     ]);
     expect(serialized).not.toContain("3273000000003210");
-    expect(serialized).not.toContain("081234567890");
+    expect(serialized).not.toContain("081200000123");
     expect(serialized).not.toContain("Budi Santoso");
     expect(serialized).not.toMatch(/"value"/);
   });

@@ -1,6 +1,8 @@
+import { useEffect } from "react";
+
 import { useVoiceGuide } from "@/components/voice/VoiceGuideProvider";
-import type { VoiceLatencyMetricName } from "@/lib/voice-latency";
 import type { EnrollmentScreenId } from "@/types/enrollment";
+import type { VoiceState } from "@/types/voice";
 
 type VoiceGuideProps = {
   screenId: EnrollmentScreenId;
@@ -28,18 +30,18 @@ const errorMessages = {
     "The Voice Guide could not connect. Check your connection and retry, or continue manually.",
 } as const;
 
-const latencyLabels: Record<VoiceLatencyMetricName, string> = {
-  "last-input-audio-to-speech-stopped": "Last input audio → speech stopped",
-  "speech-stopped-to-final-transcript": "Speech stopped → final transcript",
-  "final-transcript-to-reply-started": "Final transcript → reply started",
-  "reply-started-to-first-audio": "Reply started → first audio",
-  "tool-call-to-reply-done": "Tool call → reply done",
-  "reply-done-to-tool-result": "Reply done → tool result",
-  "tool-result-to-next-reply-started": "Tool result → next reply",
+type VoiceGuideViewProps = VoiceGuideProps & {
+  end: () => void;
+  start: () => void;
+  state: VoiceState;
 };
 
-export function VoiceGuide({ screenId }: VoiceGuideProps) {
-  const { state, start, end } = useVoiceGuide();
+export function VoiceGuideView({
+  end,
+  screenId,
+  start,
+  state,
+}: VoiceGuideViewProps) {
   const noteId = `${screenId}-voice-note`;
   const errorId = `${screenId}-voice-error`;
   const statusLabel = statusLabels[state.status];
@@ -53,12 +55,23 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
       : state.status === "off"
         ? "Start voice guidance"
         : statusLabel;
-  const latencyEntries = Object.entries(state.latencyMetrics) as Array<
-    [VoiceLatencyMetricName, number]
-  >;
-  const showDevelopmentDiagnostics =
-    process.env.NODE_ENV === "development" &&
-    (state.resolvedTranscriptionMode !== null || latencyEntries.length > 0);
+  const primaryId = `${screenId}-voice-primary`;
+  const politeAnnouncement = state.errorCode
+    ? ""
+    : state.safetyNotice ||
+      state.toolFeedback ||
+      state.guidanceMessage ||
+      (state.agentCaption
+        ? `AksesSuara says: ${state.agentCaption}`
+        : `Voice Guide status: ${statusLabel}.`);
+
+  useEffect(() => {
+    if (state.status !== "error") return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(primaryId)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [primaryId, state.status]);
 
   return (
     <aside className="voice-guide" aria-labelledby={`${screenId}-voice-title`}>
@@ -68,7 +81,10 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
           <p className="voice-guide__eyebrow">Built into this step</p>
           <h2 id={`${screenId}-voice-title`}>Voice Guide</h2>
         </div>
-        <div className={`voice-status voice-status--${state.status}`} aria-live="polite">
+        <div
+          className={`voice-status voice-status--${state.status}`}
+          aria-label={`Voice Guide status: ${statusLabel}`}
+        >
           <span className="voice-status__dot" aria-hidden="true" />
           <span>{statusLabel}</span>
         </div>
@@ -76,6 +92,7 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
 
       <div className="voice-guide__primary">
         <button
+          id={primaryId}
           className="mic-button"
           type="button"
           onClick={start}
@@ -103,20 +120,32 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
       ) : null}
 
       {state.toolFeedback ? (
-        <p className="voice-tool-feedback" role="status">
-          <span aria-hidden="true">✓</span>
+        <p
+          className={`voice-tool-feedback${state.toolFeedbackKind === "attention" ? " voice-tool-feedback--attention" : ""}`}
+        >
+          <span aria-hidden="true">
+            {state.toolFeedbackKind === "attention" ? "!" : "✓"}
+          </span>
           {state.toolFeedback}
         </p>
       ) : null}
 
       {state.safetyNotice ? (
-        <p className="voice-safety-notice" role="status">
+        <p className="voice-safety-notice">
           <span aria-hidden="true">!</span>
           {state.safetyNotice}
         </p>
       ) : null}
 
-      <div className="captions" aria-live="polite" aria-label="Live voice captions">
+      {state.guidanceMessage ? (
+        <p className="voice-guidance-message">{state.guidanceMessage}</p>
+      ) : null}
+
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {politeAnnouncement}
+      </p>
+
+      <div className="captions" aria-label="Live voice captions">
         <p className="captions__label">Live captions · Not saved</p>
         <div className="caption caption--user">
           <span>You</span>
@@ -149,27 +178,18 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
         step. You still enter information and confirm important choices yourself.
       </p>
 
-      {showDevelopmentDiagnostics ? (
-        <details className="voice-diagnostics">
-          <summary>Voice timing diagnostics · development only</summary>
-          <p>
-            Resolved transcription: {state.resolvedTranscriptionMode ?? "unknown"}. English
-            steering: {state.englishLanguageSteering ? "active" : "not confirmed"}.
-          </p>
-          {latencyEntries.length ? (
-            <dl>
-              {latencyEntries.map(([name, durationMs]) => (
-                <div key={name}>
-                  <dt>{latencyLabels[name]}</dt>
-                  <dd>{Math.round(durationMs)} ms</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p>Timing appears after the first spoken turn.</p>
-          )}
-        </details>
-      ) : null}
     </aside>
+  );
+}
+
+export function VoiceGuide({ screenId }: VoiceGuideProps) {
+  const { state, start, end } = useVoiceGuide();
+  return (
+    <VoiceGuideView
+      end={end}
+      screenId={screenId}
+      start={start}
+      state={state}
+    />
   );
 }

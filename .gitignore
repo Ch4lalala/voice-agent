@@ -8,6 +8,8 @@ AksesSuara-PRD.md
 
 # Test output
 /coverage/
+/playwright-report/
+/test-results/
 
 # Production output
 /build/

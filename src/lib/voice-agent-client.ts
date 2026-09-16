@@ -1,8 +1,4 @@
 import { createVoiceContextSnapshot, voiceAgentPromptBaseline } from "@/lib/voice-context";
-import {
-  VoiceLatencyTracker,
-  type VoiceLatencyMetric,
-} from "@/lib/voice-latency";
 import { getVoiceSafetyNotice, sanitizeVoiceCaption } from "@/lib/voice-safety";
 import { voiceToolDefinitions, type VoiceToolCall, type VoiceToolExecution } from "@/lib/voice-tools";
 import type { EnrollmentScreenContext } from "@/types/enrollment";
@@ -102,23 +98,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function resolvedConfigurationMetadata(message: Record<string, unknown>): {
-  transcriptionMode: "min_latency" | "balanced" | "max_accuracy" | "unknown";
-  englishLanguageSteering: boolean;
-} | null {
-  if (!isRecord(message.config) || !isRecord(message.config.input)) return null;
-  const input = message.config.input;
-  const transcriptionMode =
-    input.transcription_mode === "min_latency" ||
-    input.transcription_mode === "balanced" ||
-    input.transcription_mode === "max_accuracy"
-      ? input.transcription_mode
-      : "unknown";
-  const englishLanguageSteering =
-    Array.isArray(input.language_codes) && input.language_codes.includes("en");
-  return { transcriptionMode, englishLanguageSteering };
-}
-
 function acknowledgedSystemPrompt(message: Record<string, unknown>): string | null {
   return isRecord(message.config) && typeof message.config.system_prompt === "string"
     ? message.config.system_prompt
@@ -143,13 +122,14 @@ export class VoiceSessionController {
   private lastProtocolEvent: string | null = null;
   private pendingToolCalls: VoiceToolCall[] = [];
   private handledToolCallIds = new Set<string>();
-  private readonly latency = new VoiceLatencyTracker();
+  private sentToolResultIds = new Set<string>();
+  private toolExecutionInProgress = false;
+  private flushingToolCalls = false;
 
   constructor(
     private readonly runtime: VoiceRuntime,
     private readonly emit: (event: VoiceClientEvent) => void,
     private readonly handleTool?: VoiceToolHandler,
-    private readonly diagnosticsEnabled = process.env.NODE_ENV === "development",
   ) {}
 
   updateContext(context: EnrollmentScreenContext): boolean {
@@ -165,7 +145,6 @@ export class VoiceSessionController {
     if (this.phase !== "idle") return false;
 
     this.phase = "starting";
-    if (this.diagnosticsEnabled) this.latency.reset();
     const generation = ++this.generation;
     const abortController = new AbortController();
     this.abortController = abortController;
@@ -183,7 +162,6 @@ export class VoiceSessionController {
 
       const audioSession = await this.runtime.createAudioSession(stream, (audio) => {
         if (!this.isCurrent(generation) || !this.guidanceReady) return;
-        if (this.diagnosticsEnabled) this.latency.recordInputAudio();
         this.send({ type: "input.audio", audio });
       });
       if (!this.isCurrent(generation)) {
@@ -265,7 +243,6 @@ export class VoiceSessionController {
     switch (message.type) {
       case "session.ready":
         this.providerSessionReady = true;
-        this.emitResolvedConfiguration(message);
         this.sendLatestContextIfReady();
         break;
       case "session.updated":
@@ -277,9 +254,6 @@ export class VoiceSessionController {
         this.emit({ type: "USER_SPEECH_STARTED" });
         break;
       case "input.speech.stopped":
-        if (this.diagnosticsEnabled) {
-          this.emitLatency(this.latency.recordSpeechStopped());
-        }
         this.emit({ type: "USER_SPEECH_STOPPED" });
         break;
       case "transcript.user.delta":
@@ -292,28 +266,17 @@ export class VoiceSessionController {
           );
           this.emit({ type: "USER_TRANSCRIPT", text: caption.text });
           if (message.type === "transcript.user") {
-            if (this.diagnosticsEnabled) {
-              this.emitLatency(this.latency.recordFinalTranscript());
-            }
             const notice = getVoiceSafetyNotice(message.text);
             if (notice) this.emit({ type: "SAFETY_NOTICE", message: notice });
           }
         }
         break;
       case "reply.started":
-        if (this.diagnosticsEnabled) {
-          for (const metric of this.latency.recordReplyStarted()) {
-            this.emitLatency(metric);
-          }
-        }
         this.lastProtocolEvent = message.type;
         this.emit({ type: "REPLY_STARTED" });
         break;
       case "reply.audio":
         if (typeof message.data === "string") {
-          if (this.diagnosticsEnabled) {
-            this.emitLatency(this.latency.recordFirstReplyAudio());
-          }
           this.emit({ type: "REPLY_AUDIO" });
           this.audio?.play(message.data);
         }
@@ -327,9 +290,6 @@ export class VoiceSessionController {
         }
         break;
       case "reply.done":
-        if (this.diagnosticsEnabled) {
-          this.emitLatency(this.latency.recordReplyDone());
-        }
         this.lastProtocolEvent = message.type;
         if (message.status === "interrupted") this.audio?.interrupt();
         if (message.status === "interrupted") this.pendingToolCalls = [];
@@ -380,6 +340,9 @@ export class VoiceSessionController {
     this.lastProtocolEvent = null;
     this.pendingToolCalls = [];
     this.handledToolCallIds.clear();
+    this.sentToolResultIds.clear();
+    this.toolExecutionInProgress = false;
+    this.flushingToolCalls = false;
 
     const socket = this.socket;
     this.socket = null;
@@ -427,6 +390,7 @@ export class VoiceSessionController {
       this.phase !== "active" ||
       !this.providerSessionReady ||
       this.contextUpdateInFlight ||
+      this.toolExecutionInProgress ||
       !this.latestContext ||
       this.latestContext.semanticKey === this.appliedContextKey
     ) {
@@ -445,7 +409,6 @@ export class VoiceSessionController {
     if (this.handledToolCallIds.has(message.call_id)) return;
 
     this.handledToolCallIds.add(message.call_id);
-    if (this.diagnosticsEnabled) this.latency.recordToolCall();
     this.pendingToolCalls.push({
       callId: message.call_id,
       name: message.name,
@@ -456,56 +419,73 @@ export class VoiceSessionController {
   }
 
   private flushPendingToolCalls(): void {
-    if (this.lastProtocolEvent !== "reply.done" || !this.pendingToolCalls.length) return;
-
-    while (this.pendingToolCalls.length && this.lastProtocolEvent === "reply.done") {
-      const call = this.pendingToolCalls.shift()!;
-      let execution: VoiceToolExecution;
-      try {
-        execution = this.handleTool
-          ? this.handleTool(call)
-          : {
-              result: {
-                status: "blocked",
-                code: "handler_unavailable",
-                message: "That voice action is temporarily unavailable.",
-              },
-              feedback: "That voice action is temporarily unavailable.",
-            };
-      } catch {
-        execution = {
-          result: {
-            status: "blocked",
-            code: "tool_failed",
-            message: "That voice action could not be completed. Please try again.",
-          },
-          feedback: "That voice action could not be completed.",
-        };
-      }
-
-      this.send({
-        type: "tool.result",
-        call_id: call.callId,
-        result: JSON.stringify(execution.result),
-        is_error: execution.result.status === "blocked",
-      });
-      if (this.diagnosticsEnabled) {
-        this.emitLatency(this.latency.recordToolResult());
-      }
-      this.emit({ type: "TOOL_FEEDBACK", message: execution.feedback });
+    if (
+      this.flushingToolCalls ||
+      this.lastProtocolEvent !== "reply.done" ||
+      !this.pendingToolCalls.length
+    ) {
+      return;
     }
+
+    this.flushingToolCalls = true;
+    try {
+      while (this.pendingToolCalls.length && this.lastProtocolEvent === "reply.done") {
+        const call = this.pendingToolCalls.shift()!;
+        if (this.sentToolResultIds.has(call.callId)) continue;
+
+        this.toolExecutionInProgress = true;
+        let execution: VoiceToolExecution;
+        try {
+          execution = this.handleTool
+            ? this.handleTool(call)
+            : {
+                result: {
+                  status: "blocked",
+                  is_error: true,
+                  code: "handler_unavailable",
+                  message: "That voice action is temporarily unavailable.",
+                },
+                feedback: "That voice action is temporarily unavailable.",
+              };
+        } catch {
+          execution = {
+            result: {
+              status: "blocked",
+              is_error: true,
+              code: "tool_failed",
+              message: "That voice action could not be completed. Please try again.",
+            },
+            feedback: "That voice action could not be completed.",
+          };
+        }
+
+        this.sentToolResultIds.add(call.callId);
+        this.send({
+          type: "tool.result",
+          call_id: call.callId,
+          result: JSON.stringify(execution.result),
+        });
+        try {
+          execution.apply?.();
+        } catch {
+          // The provider already received the one terminal result for this call.
+          // Local effect failures must not create a duplicate or end the session.
+        }
+        this.emit({
+          type: "TOOL_FEEDBACK",
+          kind: execution.result.status === "blocked" ? "attention" : "success",
+          message: execution.feedback,
+        });
+        this.toolExecutionInProgress = false;
+      }
+    } finally {
+      this.toolExecutionInProgress = false;
+      this.flushingToolCalls = false;
+    }
+
+    this.sendLatestContextIfReady();
   }
 
-  private emitLatency(metric: VoiceLatencyMetric | null): void {
-    if (metric) this.emit({ type: "LATENCY_METRIC", metric });
-  }
-
-  private emitResolvedConfiguration(message: Record<string, unknown>): void {
-    if (!this.diagnosticsEnabled) return;
-    const metadata = resolvedConfigurationMetadata(message);
-    if (!metadata) return;
-    this.emit({ type: "SESSION_CONFIGURATION", ...metadata });
-  }
 }
 
 function stopStream(stream: VoiceMediaStream): void {

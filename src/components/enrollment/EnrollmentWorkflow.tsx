@@ -73,25 +73,37 @@ function EnrollmentWorkflowContent() {
       const execution = executeVoiceTool(call, currentState, currentContext);
       const nextState = execution.nextState ?? currentState;
       const nextPreference = execution.speechPreference ?? currentPreference;
+      const hasApplicationEffect =
+        Boolean(execution.event && execution.nextState) ||
+        Boolean(execution.speechPreference) ||
+        Boolean(execution.highlightFieldId) ||
+        nextState !== currentState ||
+        nextPreference !== currentPreference;
 
-      if (execution.event && execution.nextState) {
-        dispatchEnrollment(execution.event);
-      }
-      if (execution.speechPreference) {
-        speechPreferenceRef.current = execution.speechPreference;
-        setSpeechPreference(execution.speechPreference);
-      }
-      if (execution.highlightFieldId) {
-        setHighlightRequest((request) => ({
-          fieldId: execution.highlightFieldId!,
-          sequence: (request?.sequence ?? 0) + 1,
-        }));
-      }
+      if (!hasApplicationEffect) return execution;
 
-      if (nextState !== currentState || nextPreference !== currentPreference) {
-        syncContext(createEnrollmentScreenContext(nextState, nextPreference));
-      }
-      return execution;
+      return {
+        ...execution,
+        apply: () => {
+          if (execution.event && execution.nextState) {
+            dispatchEnrollment(execution.event);
+          }
+          if (execution.speechPreference) {
+            speechPreferenceRef.current = execution.speechPreference;
+            setSpeechPreference(execution.speechPreference);
+          }
+          if (execution.highlightFieldId) {
+            setHighlightRequest((request) => ({
+              fieldId: execution.highlightFieldId!,
+              sequence: (request?.sequence ?? 0) + 1,
+            }));
+          }
+
+          if (nextState !== currentState || nextPreference !== currentPreference) {
+            syncContext(createEnrollmentScreenContext(nextState, nextPreference));
+          }
+        },
+      };
     },
     [dispatchEnrollment, syncContext],
   );

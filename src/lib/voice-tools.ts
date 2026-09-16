@@ -25,6 +25,7 @@ export interface VoiceToolCall {
 
 export type VoiceToolResult = Record<string, unknown> & {
   status: "success" | "blocked";
+  is_error: boolean;
   code?: string;
   message?: string;
 };
@@ -32,6 +33,7 @@ export type VoiceToolResult = Record<string, unknown> & {
 export interface VoiceToolExecution {
   result: VoiceToolResult;
   feedback: string;
+  apply?: () => void;
   event?: EnrollmentEvent;
   nextState?: EnrollmentState;
   highlightFieldId?: EnrollmentFieldId;
@@ -63,11 +65,21 @@ function isVoiceToolName(name: string): name is VoiceToolName {
   return voiceToolNames.includes(name as VoiceToolName);
 }
 
-function blocked(code: string, message: string): VoiceToolExecution {
+function blocked(
+  code: string,
+  message: string,
+  isError = true,
+): VoiceToolExecution {
   return {
-    result: { status: "blocked", code, message },
+    result: { status: "blocked", is_error: isError, code, message },
     feedback: message,
   };
+}
+
+function joinLabels(labels: string[]): string {
+  if (labels.length === 1) return `“${labels[0]}”`;
+  if (labels.length === 2) return `“${labels[0]}” and “${labels[1]}”`;
+  return `${labels.slice(0, -1).map((label) => `“${label}”`).join(", ")}, and “${labels.at(-1)}”`;
 }
 
 function validateArguments(
@@ -114,27 +126,33 @@ function validationResult(
   const missingFields = context.fields
     .filter((field) => field.required && !field.complete)
     .map((field) => field.id);
+  const missingFieldLabels = missingFields.map(
+    (fieldId) =>
+      context.fields.find((field) => field.id === fieldId)?.label ??
+      "Required field",
+  );
 
   if (missingFields.length) {
+    const instruction = `Please complete ${joinLabels(missingFieldLabels)}.`;
     return {
       event,
       nextState,
-      feedback: `Please complete ${context.fields.find((field) => field.id === missingFields[0])?.label ?? "the first required field"}.`,
+      feedback: instruction,
       result: {
         status: "blocked",
+        is_error: false,
         code: "validation_failed",
+        completionState: "incomplete",
         canProceed: false,
         missingFields,
+        missingFieldLabels,
         errors: context.fields
           .filter((field) => field.error || missingFields.includes(field.id))
           .map((field) => ({
             fieldId: field.id,
             message: field.error ?? `Complete ${field.label}.`,
           })),
-        message:
-          missingFields.length === 1
-            ? "One required field is incomplete."
-            : `${missingFields.length} required fields are incomplete.`,
+        message: instruction,
       },
     };
   }
@@ -142,7 +160,13 @@ function validationResult(
   return {
     event,
     nextState,
-    result: { status: "success", canProceed: true },
+    result: {
+      status: "success",
+      is_error: false,
+      completionState: "complete",
+      canProceed: true,
+      message: "This step is complete.",
+    },
     feedback: "This step is ready to continue.",
   };
 }
@@ -180,6 +204,7 @@ export function executeVoiceTool(
     return {
       result: {
         status: "blocked",
+        is_error: false,
         code: "enrollment_incomplete",
         incompleteSections: sections,
         message: "Complete the listed demo sections before opening Review.",
@@ -200,6 +225,7 @@ export function executeVoiceTool(
       return {
         result: {
           status: "success",
+          is_error: false,
           screenId: context.screenId,
           title: context.title,
           summary: screenSummaries[context.screenId],
@@ -217,6 +243,7 @@ export function executeVoiceTool(
       return {
         result: {
           status: "success",
+          is_error: false,
           fieldId: field.id,
           label: field.label,
           message: "The field is focused and highlighted. Its value was not changed.",
@@ -235,6 +262,7 @@ export function executeVoiceTool(
           nextState: enrollmentReducer(state, event),
           result: {
             status: "success",
+            is_error: false,
             previousScreenId: "welcome",
             screenId: "requirements",
           },
@@ -242,7 +270,11 @@ export function executeVoiceTool(
         };
       }
       if (state.screenId === "review") {
-        return blocked("navigation_blocked", "Review is the final demo screen. Nothing was submitted.");
+        return blocked(
+          "navigation_blocked",
+          "Review is the final demo screen. Nothing was submitted.",
+          false,
+        );
       }
 
       const validation = validationResult(state, context);
@@ -251,13 +283,18 @@ export function executeVoiceTool(
       const event: EnrollmentEvent = { type: "NEXT" };
       const nextState = enrollmentReducer(state, event);
       if (nextState.screenId === state.screenId) {
-        return blocked("navigation_blocked", "This step cannot continue yet.");
+        return blocked(
+          "navigation_blocked",
+          "This step cannot continue yet.",
+          false,
+        );
       }
       return {
         event,
         nextState,
         result: {
           status: "success",
+          is_error: false,
           previousScreenId: state.screenId,
           screenId: nextState.screenId,
         },
@@ -268,13 +305,18 @@ export function executeVoiceTool(
       const event: EnrollmentEvent = { type: "PREVIOUS" };
       const nextState = enrollmentReducer(state, event);
       if (nextState.screenId === state.screenId) {
-        return blocked("navigation_blocked", "There is no previous screen available here.");
+        return blocked(
+          "navigation_blocked",
+          "There is no previous screen available here.",
+          false,
+        );
       }
       return {
         event,
         nextState,
         result: {
           status: "success",
+          is_error: false,
           previousScreenId: state.screenId,
           screenId: nextState.screenId,
         },
@@ -286,6 +328,7 @@ export function executeVoiceTool(
       return {
         result: {
           status: "success",
+          is_error: false,
           mode,
           screenId: context.screenId,
           message:
@@ -304,6 +347,7 @@ export function executeVoiceTool(
       return {
         result: {
           status: "success",
+          is_error: false,
           pace,
           audioSpeedChanged: false,
           message:
@@ -326,6 +370,7 @@ export function executeVoiceTool(
         nextState,
         result: {
           status: "success",
+          is_error: false,
           screenId: "review",
           submitted: false,
           message: "Review opened. Nothing was confirmed or submitted.",

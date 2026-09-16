@@ -33,14 +33,14 @@ export function ParticipantInformationScreen({ data, errors, onChange, onNext, o
       </div>
 
       <form className="preview-form preview-form--two-column" noValidate aria-label="Participant information form" onSubmit={handleSubmit}>
-        <PreviewField fieldId="fullName" label="Full name" hint="Enter a fictional name, such as Budi Santoso." error={errors.fullName} required>
+        <PreviewField fieldId="fullName" label="Full name" hint="Enter a fictional full name for this demo." error={errors.fullName} required>
           <input
             id="fullName"
             name="fullName"
-            className="text-input text-input--highlighted"
+            className="text-input"
             type="text"
             autoComplete="off"
-            placeholder="Budi Santoso"
+            placeholder="Fictional full name"
             value={data.fullName}
             onChange={update("fullName")}
             aria-describedby={`fullName-hint${errors.fullName ? " fullName-error" : ""}`}

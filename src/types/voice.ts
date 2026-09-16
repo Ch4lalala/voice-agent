@@ -1,8 +1,3 @@
-import type {
-  VoiceLatencyMetric,
-  VoiceLatencyMetricName,
-} from "@/lib/voice-latency";
-
 export type VoiceStatus =
   | "off"
   | "connecting"
@@ -18,22 +13,15 @@ export type VoiceErrorCode =
   | "agent-timeout"
   | "connection-failed";
 
-export type VoiceTranscriptionMode =
-  | "min_latency"
-  | "balanced"
-  | "max_accuracy"
-  | "unknown";
-
 export interface VoiceState {
   status: VoiceStatus;
   userCaption: string;
   agentCaption: string;
   errorCode: VoiceErrorCode | null;
   toolFeedback: string;
+  toolFeedbackKind: "success" | "attention" | null;
   safetyNotice: string;
-  resolvedTranscriptionMode: VoiceTranscriptionMode | null;
-  englishLanguageSteering: boolean | null;
-  latencyMetrics: Partial<Record<VoiceLatencyMetricName, number>>;
+  guidanceMessage: string;
 }
 
 export type VoiceStateEvent =
@@ -46,14 +34,12 @@ export type VoiceStateEvent =
   | { type: "REPLY_AUDIO" }
   | { type: "AGENT_TRANSCRIPT"; text: string }
   | { type: "REPLY_DONE" }
-  | { type: "TOOL_FEEDBACK"; message: string }
-  | { type: "SAFETY_NOTICE"; message: string }
   | {
-      type: "SESSION_CONFIGURATION";
-      transcriptionMode: VoiceTranscriptionMode;
-      englishLanguageSteering: boolean;
+      type: "TOOL_FEEDBACK";
+      kind: "success" | "attention";
+      message: string;
     }
-  | { type: "LATENCY_METRIC"; metric: VoiceLatencyMetric }
+  | { type: "SAFETY_NOTICE"; message: string }
   | { type: "FAILED"; code: VoiceErrorCode }
   | { type: "ENDED" };
 

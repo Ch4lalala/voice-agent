@@ -12,6 +12,7 @@ import {
 import {
   createVoiceAgentSystemPrompt,
   createVoiceContextSnapshot,
+  voiceAgentPromptBaseline,
 } from "../src/lib/voice-context";
 import { voiceSessionConfiguration } from "../src/lib/voice-agent-client";
 import type {
@@ -39,7 +40,7 @@ function statesForEveryScreen(): EnrollmentState[] {
   const facility = applyEvents(participant, [
     { type: "UPDATE_FIELD", fieldId: "fullName", value: "Budi Santoso" },
     { type: "UPDATE_FIELD", fieldId: "dateOfBirth", value: "1959-04-12" },
-    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081234567890" },
+    { type: "UPDATE_FIELD", fieldId: "phoneNumber", value: "081200000123" },
     { type: "NEXT" },
   ]);
   const review = applyEvents(facility, [
@@ -133,7 +134,7 @@ describe("sanitized enrollment context for voice guidance", () => {
 
     for (const rawValue of [
       "3273000000003210",
-      "081234567890",
+      "081200000123",
       "Budi Santoso",
       "1959-04-12",
     ]) {
@@ -196,6 +197,18 @@ describe("sanitized enrollment context for voice guidance", () => {
       "you receive verified structured screen information from the application",
     );
     expect(prompt).toContain("do not navigate while explaining");
+  });
+
+  it("routes missing-information questions to one successful validation continuation", () => {
+    expect(voiceAgentPromptBaseline).toContain(
+      "If asked what information is still missing, call validate_current_step exactly once",
+    );
+    expect(voiceAgentPromptBaseline).toContain(
+      "canProceed false with is_error false, do not apologize",
+    );
+    expect(voiceAgentPromptBaseline).toContain(
+      "If it reports canProceed true, say that the step is complete.",
+    );
   });
 
   it("keeps screen explanation available without requiring navigation", () => {

@@ -48,7 +48,11 @@ export function FacilitySelectionScreen({ data, errors, onCancelConfirmation, on
       </div>
 
       <form className="facility-form" noValidate aria-label="Fictional healthcare facility options" onSubmit={handleSubmit}>
-        <fieldset className="facility-list" aria-describedby={errors.facilityId ? "facilityId-error" : undefined}>
+        <fieldset
+          className="facility-list"
+          aria-describedby={errors.facilityId ? "facilityId-error" : undefined}
+          aria-invalid={Boolean(errors.facilityId)}
+        >
           <legend className="sr-only">Choose and confirm a fictional healthcare facility</legend>
           {facilityFixtures.map((facility) => {
             const isSelected = data.facilityId === facility.id;

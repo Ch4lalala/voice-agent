@@ -6,10 +6,9 @@ export const initialVoiceState: VoiceState = {
   agentCaption: "",
   errorCode: null,
   toolFeedback: "",
+  toolFeedbackKind: null,
   safetyNotice: "",
-  resolvedTranscriptionMode: null,
-  englishLanguageSteering: null,
-  latencyMetrics: {},
+  guidanceMessage: "",
 };
 
 export function voiceStateReducer(
@@ -28,7 +27,9 @@ export function voiceStateReducer(
         userCaption: "",
         errorCode: null,
         toolFeedback: "",
+        toolFeedbackKind: null,
         safetyNotice: "",
+        guidanceMessage: "",
       };
     case "USER_SPEECH_STOPPED":
       return { ...state, status: "thinking", errorCode: null };
@@ -43,27 +44,21 @@ export function voiceStateReducer(
     case "REPLY_DONE":
       return { ...state, status: "listening", errorCode: null };
     case "TOOL_FEEDBACK":
-      return { ...state, toolFeedback: event.message };
+      return {
+        ...state,
+        toolFeedback: event.message,
+        toolFeedbackKind: event.kind,
+      };
     case "SAFETY_NOTICE":
       return { ...state, safetyNotice: event.message };
-    case "SESSION_CONFIGURATION":
-      return {
-        ...state,
-        resolvedTranscriptionMode: event.transcriptionMode,
-        englishLanguageSteering: event.englishLanguageSteering,
-      };
-    case "LATENCY_METRIC":
-      return {
-        ...state,
-        latencyMetrics: {
-          ...state.latencyMetrics,
-          [event.metric.name]: event.metric.durationMs,
-        },
-      };
     case "FAILED":
       return { ...state, status: "error", errorCode: event.code };
     case "ENDED":
-      return initialVoiceState;
+      return {
+        ...initialVoiceState,
+        guidanceMessage:
+          "Voice guidance ended. Your enrollment information is unchanged.",
+      };
     default:
       return state;
   }

@@ -14,9 +14,9 @@ export function EnrollmentProgress({ currentStep }: EnrollmentProgressProps) {
   const currentLabel = currentStep > 0 ? steps[currentStep - 1] : null;
 
   return (
-    <div className="progress" aria-label="Enrollment progress">
+    <div className="progress" role="group" aria-labelledby="enrollment-progress-label">
       <div className="progress__summary">
-        <span>Enrollment journey</span>
+        <span id="enrollment-progress-label">Enrollment journey</span>
         <strong>
           {currentLabel
             ? `Step ${currentStep} of ${steps.length} · ${currentLabel}`

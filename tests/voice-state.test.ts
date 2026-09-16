@@ -27,7 +27,11 @@ describe("Voice Guide lifecycle", () => {
     expect(state.status).toBe("error");
 
     state = voiceStateReducer(state, { type: "ENDED" });
-    expect(state).toEqual(initialVoiceState);
+    expect(state).toEqual({
+      ...initialVoiceState,
+      guidanceMessage:
+        "Voice guidance ended. Your enrollment information is unchanged.",
+    });
   });
 
   it("replaces partial user captions and records the final agent caption", () => {
@@ -51,6 +55,7 @@ describe("Voice Guide lifecycle", () => {
   it("announces safe tool feedback and clears it on the next user turn", () => {
     let state = voiceStateReducer(initialVoiceState, {
       type: "TOOL_FEEDBACK",
+      kind: "success",
       message: "Family Card Number is focused and highlighted.",
     });
     expect(state.toolFeedback).toBe(
@@ -59,6 +64,7 @@ describe("Voice Guide lifecycle", () => {
 
     state = voiceStateReducer(state, { type: "USER_SPEECH_STARTED" });
     expect(state.toolFeedback).toBe("");
+    expect(state.toolFeedbackKind).toBeNull();
   });
 
   it("announces a safety response and clears it before the next utterance", () => {
@@ -83,25 +89,12 @@ describe("Voice Guide lifecycle", () => {
     expect(enrollmentState).toEqual(createInitialEnrollmentState());
   });
 
-  it("stores development-safe configuration and timing metadata only", () => {
-    let state = voiceStateReducer(initialVoiceState, {
-      type: "SESSION_CONFIGURATION",
-      transcriptionMode: "min_latency",
-      englishLanguageSteering: true,
-    });
-    state = voiceStateReducer(state, {
-      type: "LATENCY_METRIC",
-      metric: {
-        name: "speech-stopped-to-final-transcript",
-        durationMs: 125.4,
-      },
-    });
-
-    expect(state.resolvedTranscriptionMode).toBe("min_latency");
-    expect(state.englishLanguageSteering).toBe(true);
-    expect(state.latencyMetrics).toEqual({
-      "speech-stopped-to-final-transcript": 125.4,
-    });
-    expect(JSON.stringify(state)).not.toMatch(/transcript text|token|system_prompt/i);
+  it("reports clean guidance end without changing enrollment state", () => {
+    const state = voiceStateReducer(
+      { ...initialVoiceState, status: "listening" },
+      { type: "ENDED" },
+    );
+    expect(state.status).toBe("off");
+    expect(state.guidanceMessage).toContain("enrollment information is unchanged");
   });
 });

@@ -10,9 +10,10 @@ Last updated: September 16, 2026
 - **Phase 3 — Basic AssemblyAI voice connection:** Complete
 - **Phase 4 — Screen-context synchronization:** Complete
 - **Phase 5 — Verified client-side tools:** Complete
-- **Phase 6 — Privacy, safety, and resilience:** Regression fix and automated verification complete; live microphone retest pending
+- **Phase 6 — Privacy, safety, and resilience:** Complete
+- **Phase 7 — Accessibility, testing, and demo polish:** Complete
 
-Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, failure paths, and the observed latency/screen-awareness regression fix are implemented and automatically verified. A short real-microphone latency, screen-context, guardrail, and teardown retest remains pending; Phase 7 has not started.
+Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, failure paths, latency/screen-awareness correction, tool-result continuation correction, automated verification, and user-performed real-microphone regression verification are complete. Phase 7 implementation, automated verification, and the final user-performed real-audio acceptance checks are complete. The AksesSuara hackathon MVP is fully implemented and fully live-verified.
 
 ## Repository condition before Phase 0
 
@@ -368,7 +369,7 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 
 - Followed the current official [AssemblyAI client-side tools](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/tools/client-side-tools), [events reference](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference), [message sequence](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/message-sequence), and [inline session configuration](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration) documentation.
 - Declared exactly eight flat-schema AssemblyAI function tools: `explain_current_screen`, `highlight_field`, `validate_current_step`, `go_to_next_step`, `go_to_previous_step`, `repeat_instruction`, `set_speech_preference`, and `show_review`.
-- The current official protocol supplies `tool.call.arguments` as an object and requires `tool.result.result` to be a JSON string. The controller queues each unique call, executes it only after a completed `reply.done` is the latest protocol event, returns the original `call_id`, uses `is_error` for blocked results, and lets the agent begin its subsequent reply normally.
+- The current official protocol supplies `tool.call.arguments` as an object and requires `tool.result.result` to be a JSON string. The controller queues each unique call, executes it only after a completed `reply.done` is the latest protocol event, returns the original `call_id`, and lets the agent begin its subsequent reply normally. Current documentation defines only `type`, `call_id`, and `result` on the event envelope; outcome classification is therefore kept inside the structured JSON result.
 - Added a pure tool dispatcher that checks the fixed name allowlist, exact argument keys and enum values, current `allowedActions`, current-screen field identifiers, and the exact semantic context key the agent received before any focus or reducer mutation.
 - Unknown, malformed, unavailable, stale, duplicated, and interrupted calls fail without state mutation. Structured blocked results contain only stable identifiers, predefined messages, and deterministic validation information; tool failure does not terminate voice guidance.
 - Added reducer-owned `VALIDATE_CURRENT_STEP` and `SHOW_REVIEW` events. Voice navigation uses the same Phase 2 validation and reducer as manual navigation, moves no more than one normal step, preserves in-memory data, and cannot submit or confirm completion.
@@ -524,22 +525,122 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 - Added `src/lib/voice-latency.ts` and `tests/voice-latency.test.ts`.
 - Modified `src/lib/voice-agent-client.ts`, `src/lib/voice-context.ts`, `src/lib/voice-state.ts`, `src/types/voice.ts`, `src/components/voice/VoiceGuide.tsx`, and `src/app/globals.css`.
 - Updated `tests/voice-session-controller.test.ts`, `tests/voice-context.test.ts`, `tests/voice-safety.test.ts`, and `tests/voice-state.test.ts`.
-- Reconciled `DESIGN.md`, `UX-CONTRACT.md`, and this status file with the current official protocol and the pending live retest. The pre-existing generated `next-env.d.ts` worktree change was preserved.
+- Reconciled `DESIGN.md`, `UX-CONTRACT.md`, and this status file with the current official protocol. The pre-existing generated `next-env.d.ts` worktree change was preserved.
 
-## Phase 6 pending real-browser retest
+## Phase 6 tool-result continuation regression fix
 
-- This execution environment cannot provide a physical microphone or verify audible output. No live latency or screen-awareness success is claimed. With `npm run dev` open at `http://127.0.0.1:3000`, use dummy data and complete one short session:
-  1. Expand **Voice timing diagnostics · development only**. Confirm resolved transcription is `min_latency` and English steering is active.
-  2. Speak one short sentence, then record the approximate displayed intervals for **Last input audio → speech stopped**, **Speech stopped → final transcript**, **Final transcript → reply started**, and **Reply started → first audio**. Report them separately; do not combine them into an STT estimate.
-  3. On Requirements, ask “On this screen, what should I do now?” Confirm the guide explains the four readiness confirmations from structured context.
-  4. On Family Information, ask the same question. Confirm it explains typed-only Family Card entry and relationship selection without asking for a spoken number.
-  5. On Healthcare Facility Selection, ask the same question. Confirm it explains comparison plus manual selection/confirmation and does not select anything.
-  6. Confirm none of those responses says it is unable to read or see the screen. Ask “Can you see my screen?” and confirm it says it receives verified structured application information without claiming computer-vision access.
-  7. Exercise one tool request and record the displayed **Tool call → reply done**, **Reply done → tool result**, and **Tool result → next reply** intervals. Confirm simple screen help uses no more than one tool.
-  8. Recheck the Phase 6 safeguards: spoken dummy sensitive data is redacted and redirected to typed entry; terms, CAPTCHA, submission, automatic facility choice, medical, eligibility, and official-status requests remain safely refused or redirected.
-  9. End Guidance. In the WebSocket inspector, confirm one `session.end`, then `session.ended`; confirm the socket closes, microphone capture stops, audio/resources are released, and enrollment state is unchanged.
-- If default semantic turn detection remains unacceptably slow after these interval measurements, consider a carefully bounded `max_silence` only as a separately documented follow-up. No fixed threshold has been added because older and slow-speaking users must not be cut off.
+- A later real-browser Requirements test found that deterministic validation correctly identified **Email address available or not applicable** as the only missing item and updated the UI, but the agent followed with a generic tool-error apology.
+- Root cause: the expected incomplete state used the PRD-defined `status: "blocked"`, and the client incorrectly copied that domain status to an envelope-level `is_error: true`. The current official AssemblyAI `tool.result` schema documents only `type`, matching `call_id`, and a JSON-string `result`; it does not document envelope-level `is_error` or tool-level `response_instructions`. The unsupported envelope field was removed.
+- Structured results now distinguish expected product blocks from execution failures. Incomplete validation and conditionally unavailable Review return `is_error: false`, safe completion state, allowlisted identifiers and labels, and a concise continuation message. Malformed, stale, unknown, or unavailable calls still return `is_error: true` inside the JSON result and cannot mutate state.
+- “Which information is still missing?” is explicitly routed to one `validate_current_step` call. With only email unchecked, the result says `Please complete “Email address available or not applicable”.`; with all requirements complete, it says the step is complete. The prompt explicitly forbids an apology for `canProceed: false` plus `is_error: false`.
+- Tool execution is now transactionally ordered: the unique call leaves the pending queue before validation; the official-schema `tool.result` is recorded and sent exactly once; only then are focus, reducer, speech-preference, or context effects applied. A context update caused by the tool is queued during execution and sent after the result, so it cannot retroactively make that call stale or interfere with its continuation.
+- Duplicate `tool.call` and `reply.done` events remain no-ops after terminal handling. There is no client-side tool timeout; the declared ten-second timeout is provider-owned and is resolved by the matching result. Advancing fake time beyond that window after success produces no late error result.
+- The same non-error result contract was verified for current-screen explanation, focus/highlight, complete validation, one-step navigation, previous-step navigation, repeat, simplify, conditional Review, and speech preference. Facility values remain user-controlled; validation changes no checkbox and performs no navigation.
 
-## Next phase
+## Phase 6 tool-result regression automated verification
 
-Phase 6 — Privacy, safety, and resilience — awaits the real-microphone regression checklist above. Phase 7 has not been started and must not begin without explicit approval after Phase 6 is complete.
+- Targeted TypeScript and Vitest verification passed for the exact one-email-missing lifecycle, multiple and zero missing Requirements, result-before-context ordering, stale pre-execution rejection, duplicate suppression, late-timeout no-op behavior, safe continuation wording, state immutability, and result sanitization.
+- `npm run check` passed: ESLint clean; strict TypeScript clean; Vitest passed 11 files and 87 tests; the Next.js 16.3.5 production build completed successfully with `/api/voice/token` remaining dynamic. The required build regenerated `next-env.d.ts` from development type imports to production type imports.
+- Production start smoke passed: `next start` became ready on `127.0.0.1:3106`, `GET /` returned HTTP 200, and the server was stopped cleanly.
+- Strict premium UI audit passed with 0 findings. `DESIGN.md` lint passed with 0 errors and 0 warnings (one informational token summary), and `npm audit --omit=dev` reported 0 vulnerabilities.
+- Credential, dummy-sensitive-value, persistence, logging, unsafe-code, official `tool.result` envelope, dependency-drift, environment-config-drift, and whitespace scans passed. `.env.local` remains ignored and was not opened or displayed.
+- Existing enrollment, context, privacy, guardrail, voice lifecycle, teardown, and token-route coverage remains green.
+- The execution environment could not provide physical microphone input, so the focused live result was supplied by the user and is recorded below.
+
+## Files changed for the Phase 6 tool-result continuation fix
+
+- Modified `src/lib/voice-agent-client.ts`, `src/lib/voice-tools.ts`, `src/lib/voice-context.ts`, `src/components/enrollment/EnrollmentWorkflow.tsx`, and `src/components/voice/VoiceGuideProvider.tsx`.
+- Updated `tests/voice-session-controller.test.ts`, `tests/voice-tools.test.ts`, and `tests/voice-context.test.ts`.
+- Reconciled `UX-CONTRACT.md` and this status file with the current official protocol and live verification result.
+- `next-env.d.ts` was regenerated by the required Next.js production build. No dependency, lockfile, environment example, token-route, validation-policy, or persistence change was made.
+
+## Phase 6 tool-result regression manual live verification
+
+- The user completed the real-microphone Phase 6 regression retest and reported that voice latency improved to an acceptable conversational level.
+- Screen-aware guidance worked on the tested enrollment screens, and the agent no longer said that it was unable to read the screen when verified structured screen context was available.
+- “Which information is still missing?” correctly identified the incomplete Requirements field without the previous generic continuation error or apology.
+- Repeated missing-information requests continued to succeed without duplicate results, checkbox changes, or navigation. After every requirement was completed, the guide correctly reported that the step was complete.
+- Sensitive-data and prohibited-action guardrails passed in the live session.
+- End Guidance completed clean voice-session teardown, including microphone, audio, and connection cleanup, while preserving enrollment state.
+- The latency, screen-awareness, tool-result continuation, safety, teardown, and state-preservation regressions are resolved based on this user-provided live evidence. Phase 6 is complete.
+
+## Repository condition before Phase 7
+
+- The repository was on `main` and tracked `main...origin/main`; Phase 7 did not change branches, commit, push, publish, or deploy.
+- The worktree already contained the approved uncommitted Phase 6 implementation in `IMPLEMENTATION_STATUS.md`, `UX-CONTRACT.md`, `next-env.d.ts`, the enrollment/voice integration, and its tests. Those changes were preserved and completed in place.
+- `npm run check` passed before Phase 7 with 11 Vitest files and 87 tests. No browser-test framework or project README existed.
+- `.env.local` was confirmed ignored without opening or displaying it. No credential value was requested, read, printed, copied, or logged.
+- npm remained the project package manager. Playwright and axe-core were added only for the required Phase 7 browser and accessibility verification.
+
+## Phase 7 work completed
+
+- Completed the accessibility pass across all six enrollment screens and every Voice Guide lifecycle state while preserving the Phase 1 visual system and Phase 2–6 behavior.
+- Added semantic current-step progress, required/error relationships, first-invalid focus, screen-heading focus, meaningful Review-edit focus, accessible retry focus, and temporary voice-tool focus/highlight cleanup.
+- Consolidated non-error voice announcements into one polite atomic live region. Final agent captions, safe redaction notices, tool feedback, guidance-ended feedback, and status changes are announced without repeatedly announcing partial user captions. Recoverable errors use one adjacent alert and focus Retry.
+- Kept status and tool outcomes understandable through visible text and symbols rather than color alone. Expected incomplete data uses an amber attention treatment and remains a successful product result, not a provider error.
+- Preserved approximately 44-pixel enabled targets, visible high-contrast focus, natural scrolling, forced-colors support, and reduced-motion behavior. Removed the Phase 6 timing-diagnostics UI, state, styles, implementation module, and tests from the presentation-ready application.
+- Added deterministic Playwright and axe-core coverage for the complete manual workflow, reset and refresh clearing, keyboard-only completion, first-error focus, sensitive masking, explicit facility confirmation, Review, completion, no official submission request, permission denial, four required viewport sizes, reduced motion, and 200% CSS zoom-equivalent reflow.
+- Added a final product README, exact dummy-data demo script, manual voice acceptance matrix, and a traceable PRD Section 20 acceptance audit.
+- Removed the approved example person's name from production placeholder copy so the approved raw dummy values appear only in tests and demo documentation, as required by the final leakage policy.
+
+## Phase 7 files
+
+Created:
+
+- `README.md`
+- `DEMO_GUIDE.md`
+- `QA_CHECKLIST.md`
+- `playwright.config.ts`
+- `e2e/enrollment.spec.ts`
+
+Removed as development-only artifacts:
+
+- `src/lib/voice-latency.ts`
+- `tests/voice-latency.test.ts`
+
+Modified for Phase 7 or reconciled with the existing Phase 6 work:
+
+- `.gitignore`, `DESIGN.md`, `UX-CONTRACT.md`, `IMPLEMENTATION_STATUS.md`, `premium-ui.json`
+- `package.json`, `package-lock.json`, `vitest.config.mts`, `next-env.d.ts`
+- `src/app/globals.css`
+- `src/components/enrollment/EnrollmentProgress.tsx`, `EnrollmentWorkflow.tsx`, `screens/FacilitySelectionScreen.tsx`, and `screens/ParticipantInformationScreen.tsx`
+- `src/components/voice/VoiceGuide.tsx` and `VoiceGuideProvider.tsx`
+- `src/lib/voice-agent-client.ts`, `voice-context.ts`, `voice-state.ts`, and `voice-tools.ts`
+- `src/types/voice.ts`
+- `tests/enrollment-components.test.tsx`, `enrollment-machine.test.ts`, `voice-context.test.ts`, `voice-session-controller.test.ts`, `voice-state.test.ts`, and `voice-tools.test.ts`
+
+## Dependencies and test inventory
+
+- Added development-only `@playwright/test@1.63.0` and `@axe-core/playwright@4.13.0`; no runtime dependency or unrelated package was added or upgraded.
+- Unit/component suite: 10 files and 91 tests. Coverage includes the state machine, masking, sanitized context, safety redaction, tool allowlist/schema/staleness/duplicates, expected-incomplete continuation, cleanup, all Voice Guide text states, live-region policy, recoverable errors, Review masking/disclaimer, progress semantics, and prohibited actions.
+- Browser suite: 8 Chromium tests. It includes the critical deterministic flow, a keyboard-only flow, four full six-screen axe/layout matrices, reduced motion plus 200% CSS zoom-equivalent reflow, and permission-denial recovery.
+- The browser suite uses no AssemblyAI credential and does not claim to test a real voice session.
+
+## Phase 7 verification results
+
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed 10 files / 91 tests; Next.js 16.3.5 production build completed with `/api/voice/token` remaining dynamic.
+- `npm run test:e2e` against the development server — passed 8/8 in 31.2 seconds.
+- `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3108 npm run test:e2e` against `next start` — passed 8/8 in 29.5 seconds; the temporary production server was stopped cleanly.
+- Responsive/axe matrix — passed 24 screen/viewport combinations across 320×800, 375×812, 768×1024, and 1440×900 with no WCAG A/AA violations, horizontal overflow, tested clipping, or undersized enabled targets.
+- Keyboard-only walkthrough — passed through completion with native controls, explicit facility confirmation, and meaningful completion focus; no keyboard trap was found.
+- Reduced-motion and 200% CSS zoom-equivalent reflow — passed. Mobile 320×800 and desktop 1440×900 full-page captures were also visually reviewed without overlap or clipped critical actions.
+- Strict premium UI audit — passed with 0 findings. `DESIGN.md` lint — passed with 0 errors and 0 warnings. `npm audit --omit=dev` — passed with 0 vulnerabilities. `git diff --check` — passed.
+- Dependency inventory — `npm ls --depth=0` exited successfully. Next's downloaded optional Sharp WebAssembly packages are reported as extraneous local build artifacts; they are not project manifest dependencies.
+- Security/privacy scans — passed: `.env.local` remains ignored; rendered HTML and production client chunks contain no AssemblyAI environment names or test credential marker; source and client chunks contain none of the approved raw demo values; the application source contains no browser persistence, application logging, native alert/confirm/prompt, official-brand asset, or production timing-diagnostics implementation.
+- Network/source audit — only the same-origin temporary-token request and the AssemblyAI Voice Agent WebSocket are present; the automated completion path produced no official BPJS registration request.
+- No API key, temporary token, raw Family Card number, or raw phone number appeared in rendered HTML, client chunks, test output, application logs, voice context, tool results, captions, Review HTML, or error text. Approved raw dummy values remain intentionally limited to tests and demo documentation.
+
+## Acceptance and demo readiness
+
+- `QA_CHECKLIST.md` records all 32 PRD Section 20 criteria as verified **Pass** using automated evidence and documented user observations.
+- The broader manual voice matrix records all 17 scenarios as **Pass**, including the final user-observed Repeat, behavioral slower-speech, and audible-interruption checks.
+- `DEMO_GUIDE.md` contains the PRD Section 22 sequence, exact phrases, expected visible results, expected response categories, fallback phrases, reset steps, a non-voice continuity path, approved fictional data, and reminders not to use real information or expose DevTools credentials.
+- `README.md` documents the audience, implemented architecture, server-only credential flow, deterministic tool ownership, setup and commands, approved dummy data, live demo path, accessibility, privacy/safety, real-versus-simulated behavior, limitations, non-affiliation, and separately scoped future work.
+
+## Final status
+
+- **Phase 6:** Complete using the detailed user-provided real-microphone evidence recorded above.
+- **Final Phase 7 live verification:** The user verified that “Please repeat that” repeated only the current instruction; “Speak more slowly” applied shorter, more deliberate sentences without claiming a technical TTS speed change; and interrupting audible playback stopped and cleared the previous audio, processed the new screen-aware request, and preserved the active voice session and enrollment state.
+- **Phase 7:** Complete. All acceptance criteria and manual voice scenarios are verified as passed.
+- **Hackathon MVP:** Fully implemented and fully live-verified.
+- No later phase exists in the current PRD. Any future work requires separate approval and scope.

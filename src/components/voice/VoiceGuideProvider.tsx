@@ -46,6 +46,7 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
           return {
             result: {
               status: "blocked",
+              is_error: true,
               code: "handler_unavailable",
               message: "That voice action is temporarily unavailable.",
             },
