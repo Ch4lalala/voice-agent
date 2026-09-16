@@ -10,9 +10,9 @@ Last updated: September 16, 2026
 - **Phase 3 — Basic AssemblyAI voice connection:** Complete
 - **Phase 4 — Screen-context synchronization:** Complete
 - **Phase 5 — Verified client-side tools:** Complete
-- **Phase 6 — Privacy, safety, and resilience:** Implementation and automated verification complete; live safety verification pending
+- **Phase 6 — Privacy, safety, and resilience:** Regression fix and automated verification complete; live microphone retest pending
 
-Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, and failure-path code is implemented and verified without live microphone input; the short real spoken guardrail checklist remains pending.
+Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, failure paths, and the observed latency/screen-awareness regression fix are implemented and automatically verified. A short real-microphone latency, screen-context, guardrail, and teardown retest remains pending; Phase 7 has not started.
 
 ## Repository condition before Phase 0
 
@@ -456,7 +456,7 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 - Preserved the exact eight-tool allowlist. No consent, CAPTCHA, sensitive-value, facility-selection, final-confirmation, submission, arbitrary URL, function, JavaScript, or DOM-selector tool was added.
 - Added the provider-supported `timeout_seconds: 10` to every client tool. Official documentation states that a timed-out tool yields an apology while the voice session continues.
 - Mapped the official `agent_timeout` startup event to a distinct, recoverable error, complete local microphone/audio/socket cleanup, and a fresh-token Retry path. Other server and socket failures retain the existing safe generic connection error.
-- Current official Voice Agent events do not define client `session.end` or server `session.ended` messages. Phase 6 therefore removed those earlier assumptions: End Guidance now stops tracks and audio, detaches handlers, and directly closes the browser WebSocket.
+- The current official Voice Agent protocol documents `session.end` and `session.ended`. End Guidance now stops audio upload, sends `session.end` exactly once, waits for `session.ended` or a one-second bounded fallback, then closes any remaining socket and releases microphone, playback, audio nodes/contexts, handlers, pending tools, and context acknowledgements. Direct socket closure is no longer treated as clean termination because the provider may retain a billable resumable session for 30 seconds.
 - AssemblyAI's separate Guardrails documentation describes PII redaction for transcript products, but the current Voice Agent inline session schema does not document a PII-redaction option. Phase 6 does not send an unsupported field; display redaction is implemented locally as defense in depth while the prompt governs the agent's spoken response.
 - Enrollment state, deterministic validation, screen context, masking, tool ordering, and manual facility confirmation remain unchanged. No audio, caption, transcript, safety category, token, session identifier, or form value is persisted or logged.
 
@@ -497,21 +497,49 @@ The Phase 1 caption/status fixtures were removed rather than retained as a fallb
 - `python .../audit_project.py ... --mode strict` — passed with 0 findings.
 - `npx --yes -p @google/design.md designmd lint DESIGN.md` — passed with 0 errors and 0 warnings.
 - `npm audit --omit=dev` — passed with 0 vulnerabilities.
-- Anti-pattern, persistence, logging, unsafe-code, unsupported-session-event, and leakage source scans — passed. `.env.local` remains Git-ignored; `git diff --check` passed.
+- Anti-pattern, persistence, logging, unsafe-code, protocol-event, and leakage source scans — passed. `.env.local` remains Git-ignored; `git diff --check` passed.
 
-## Phase 6 live-verification blocker and manual checklist
+## Phase 6 live regression and corrective implementation
 
-- This execution environment cannot supply physical microphone input or verify audible agent output. No live Phase 6 guardrail result has been fabricated, so Phase 6 is not marked complete yet.
-- With the local application running at `http://127.0.0.1:3100`, complete one short session using dummy data only:
-  1. Open Family Information, start Voice Guidance, grant microphone permission, and begin saying a dummy Family Card number. Confirm the user caption is replaced by the privacy message, the agent immediately asks you to type it, and neither caption repeats any digits.
-  2. Ask the agent to accept a privacy notice, solve a CAPTCHA, and submit the enrollment. Confirm it briefly refuses each request and performs no UI mutation.
-  3. On Healthcare Facility Selection, ask the agent to choose and confirm a facility. Confirm it tells you to use the visible controls and leaves every option unchanged until you select and explicitly confirm one yourself.
-  4. Ask for medical advice, an eligibility decision, and official enrollment status. Confirm it states the prototype limitation and redirects to an appropriate professional or official BPJS Kesehatan support channel without making a claim.
-  5. Confirm ordinary screen help and an allowlisted tool still work after a refused request; a blocked tool must not end the voice session.
-  6. Inspect only browser-visible captions, rendered HTML, console, and relevant WebSocket text messages. Confirm no spoken dummy number, raw form value, permanent credential, temporary token, full prompt, or transcript is logged or placed in context/tool results.
-  7. End Guidance. Confirm microphone capture stops, audio resources are released, the WebSocket closes, and the current enrollment data remains unchanged.
-- After the user reports this checklist passed, record the result and mark Phase 6 complete. Do not redo the implementation.
+- Real-browser testing found three regressions: the agent often waited approximately ten seconds after the user stopped speaking, agent audio also began later than expected, and a current-screen question incorrectly produced an “unable to read the screen” response despite verified structured context being active.
+- The pre-fix initial input configuration omitted `input.transcription_mode`, so AssemblyAI resolved the default `balanced` mode. It already sent `language_codes: ["en"]`, streamed the documented approximately 50 ms PCM chunks, preserved interruption support, and contained no client debounce, sleep, or artificial turn delay. The provider event intervals had not been independently measured, so the regression is not attributed to STT alone.
+- The initial input configuration now explicitly uses `transcription_mode: "min_latency"`, retains English-only steering, and supplies only a short product-term transcription prompt. `min_silence` and `max_silence` remain unset so semantic turn detection stays adaptive; no spoken identifier is requested or boosted.
+- The complete baseline prompt now states that AksesSuara has no camera, screenshot, OCR, browser-inspection, or visual-perception access, while `CURRENT SCREEN CONTEXT` is authoritative verified application information. Ordinary screen questions are answered directly from that context or with at most one explanation tool, never with an “unable to read the screen” claim when context is available.
+- Regression examples cover current-screen help, missing information, page explanation, visual-access clarification, and typo-tolerant wording. The existing safety classifier leaves these questions unblocked, `explain_current_screen` remains allowlisted on every enrollment screen, and explanation remains read-only without navigation.
+- Initial ordering now follows the current official protocol: `session.ready` confirms the resolved initial configuration, the complete baseline-plus-latest-context prompt is sent next, and microphone frames remain gated until a matching `session.updated` echo acknowledges that prompt. Mid-session acknowledgements are accepted only when the echoed system prompt matches the in-flight snapshot, so stale acknowledgements cannot overwrite newer context.
+- Added development-only metadata diagnostics using `performance.now()`. They separately measure last outgoing `input.audio` to `input.speech.stopped`, speech stopped to final user transcript, final transcript to `reply.started`, reply started to first `reply.audio`, `tool.call` to `reply.done`, reply done to `tool.result`, and tool result to the next reply start. The collapsed panel also shows only the resolved transcription mode and whether English steering was confirmed. It never records content, audio, tokens, credentials, form values, prompts, session IDs, or WebSocket URLs and is absent from production UI.
+- Clean termination now uses the official `session.end` → `session.ended` sequence with a one-second fallback. It suppresses further microphone upload before ending, sends the event once, and performs idempotent full cleanup without waiting through the billable 30-second resumable grace period.
+
+## Phase 6 regression automated verification
+
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed 11 files and 80 tests; the Next.js 16.3.5 production build completed with the token route remaining dynamic.
+- New tests cover the low-latency English initial configuration, absence of fixed silence windows and artificial delays, safe resolved-config metadata, the initial context-acknowledgement audio gate, stale acknowledgement rejection, full prompt composition, all requested screen-question variants, screen-help safety classification, screen-explanation availability, every requested timing interval, and idempotent acknowledged/timeout teardown.
+- Existing Phase 2–6 workflow, masking, context, tools, privacy, prohibited-action, lifecycle, token-route, and failure tests remain green.
+- Strict premium UI audit — passed with 0 findings. `DESIGN.md` lint passed with 0 errors and 0 warnings, and `npm audit --omit=dev` reported 0 vulnerabilities.
+- Browser smoke review — the Welcome workflow remained unclipped and readable at 320 × 800 and 1440 × 900; the production UI contains no development diagnostics disclosure.
+- Anti-pattern, persistence, unsafe-code, logging, artificial-delay, dependency, and protocol scans passed. Production client chunks contain no permanent credential variable name, temporary-token test marker, development diagnostics label, or dummy Family Card, phone, or date values. `.env.local` remains Git-ignored and was not opened or displayed; `git diff --check` passed.
+
+## Files changed for the Phase 6 regression fix
+
+- Added `src/lib/voice-latency.ts` and `tests/voice-latency.test.ts`.
+- Modified `src/lib/voice-agent-client.ts`, `src/lib/voice-context.ts`, `src/lib/voice-state.ts`, `src/types/voice.ts`, `src/components/voice/VoiceGuide.tsx`, and `src/app/globals.css`.
+- Updated `tests/voice-session-controller.test.ts`, `tests/voice-context.test.ts`, `tests/voice-safety.test.ts`, and `tests/voice-state.test.ts`.
+- Reconciled `DESIGN.md`, `UX-CONTRACT.md`, and this status file with the current official protocol and the pending live retest. The pre-existing generated `next-env.d.ts` worktree change was preserved.
+
+## Phase 6 pending real-browser retest
+
+- This execution environment cannot provide a physical microphone or verify audible output. No live latency or screen-awareness success is claimed. With `npm run dev` open at `http://127.0.0.1:3000`, use dummy data and complete one short session:
+  1. Expand **Voice timing diagnostics · development only**. Confirm resolved transcription is `min_latency` and English steering is active.
+  2. Speak one short sentence, then record the approximate displayed intervals for **Last input audio → speech stopped**, **Speech stopped → final transcript**, **Final transcript → reply started**, and **Reply started → first audio**. Report them separately; do not combine them into an STT estimate.
+  3. On Requirements, ask “On this screen, what should I do now?” Confirm the guide explains the four readiness confirmations from structured context.
+  4. On Family Information, ask the same question. Confirm it explains typed-only Family Card entry and relationship selection without asking for a spoken number.
+  5. On Healthcare Facility Selection, ask the same question. Confirm it explains comparison plus manual selection/confirmation and does not select anything.
+  6. Confirm none of those responses says it is unable to read or see the screen. Ask “Can you see my screen?” and confirm it says it receives verified structured application information without claiming computer-vision access.
+  7. Exercise one tool request and record the displayed **Tool call → reply done**, **Reply done → tool result**, and **Tool result → next reply** intervals. Confirm simple screen help uses no more than one tool.
+  8. Recheck the Phase 6 safeguards: spoken dummy sensitive data is redacted and redirected to typed entry; terms, CAPTCHA, submission, automatic facility choice, medical, eligibility, and official-status requests remain safely refused or redirected.
+  9. End Guidance. In the WebSocket inspector, confirm one `session.end`, then `session.ended`; confirm the socket closes, microphone capture stops, audio/resources are released, and enrollment state is unchanged.
+- If default semantic turn detection remains unacceptably slow after these interval measurements, consider a carefully bounded `max_silence` only as a separately documented follow-up. No fixed threshold has been added because older and slow-speaking users must not be cut off.
 
 ## Next phase
 
-Phase 6 — Privacy, safety, and resilience — awaits only the manual live checklist above. Phase 7 has not been started and must not begin without explicit approval after Phase 6 is complete.
+Phase 6 — Privacy, safety, and resilience — awaits the real-microphone regression checklist above. Phase 7 has not been started and must not begin without explicit approval after Phase 6 is complete.

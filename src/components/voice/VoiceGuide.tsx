@@ -1,4 +1,5 @@
 import { useVoiceGuide } from "@/components/voice/VoiceGuideProvider";
+import type { VoiceLatencyMetricName } from "@/lib/voice-latency";
 import type { EnrollmentScreenId } from "@/types/enrollment";
 
 type VoiceGuideProps = {
@@ -27,6 +28,16 @@ const errorMessages = {
     "The Voice Guide could not connect. Check your connection and retry, or continue manually.",
 } as const;
 
+const latencyLabels: Record<VoiceLatencyMetricName, string> = {
+  "last-input-audio-to-speech-stopped": "Last input audio → speech stopped",
+  "speech-stopped-to-final-transcript": "Speech stopped → final transcript",
+  "final-transcript-to-reply-started": "Final transcript → reply started",
+  "reply-started-to-first-audio": "Reply started → first audio",
+  "tool-call-to-reply-done": "Tool call → reply done",
+  "reply-done-to-tool-result": "Reply done → tool result",
+  "tool-result-to-next-reply-started": "Tool result → next reply",
+};
+
 export function VoiceGuide({ screenId }: VoiceGuideProps) {
   const { state, start, end } = useVoiceGuide();
   const noteId = `${screenId}-voice-note`;
@@ -42,6 +53,12 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
       : state.status === "off"
         ? "Start voice guidance"
         : statusLabel;
+  const latencyEntries = Object.entries(state.latencyMetrics) as Array<
+    [VoiceLatencyMetricName, number]
+  >;
+  const showDevelopmentDiagnostics =
+    process.env.NODE_ENV === "development" &&
+    (state.resolvedTranscriptionMode !== null || latencyEntries.length > 0);
 
   return (
     <aside className="voice-guide" aria-labelledby={`${screenId}-voice-title`}>
@@ -131,6 +148,28 @@ export function VoiceGuide({ screenId }: VoiceGuideProps) {
         actions are checked by the application before they can highlight, validate, or move one
         step. You still enter information and confirm important choices yourself.
       </p>
+
+      {showDevelopmentDiagnostics ? (
+        <details className="voice-diagnostics">
+          <summary>Voice timing diagnostics · development only</summary>
+          <p>
+            Resolved transcription: {state.resolvedTranscriptionMode ?? "unknown"}. English
+            steering: {state.englishLanguageSteering ? "active" : "not confirmed"}.
+          </p>
+          {latencyEntries.length ? (
+            <dl>
+              {latencyEntries.map(([name, durationMs]) => (
+                <div key={name}>
+                  <dt>{latencyLabels[name]}</dt>
+                  <dd>{Math.round(durationMs)} ms</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p>Timing appears after the first spoken turn.</p>
+          )}
+        </details>
+      ) : null}
     </aside>
   );
 }

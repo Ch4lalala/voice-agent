@@ -7,6 +7,9 @@ export const initialVoiceState: VoiceState = {
   errorCode: null,
   toolFeedback: "",
   safetyNotice: "",
+  resolvedTranscriptionMode: null,
+  englishLanguageSteering: null,
+  latencyMetrics: {},
 };
 
 export function voiceStateReducer(
@@ -43,6 +46,20 @@ export function voiceStateReducer(
       return { ...state, toolFeedback: event.message };
     case "SAFETY_NOTICE":
       return { ...state, safetyNotice: event.message };
+    case "SESSION_CONFIGURATION":
+      return {
+        ...state,
+        resolvedTranscriptionMode: event.transcriptionMode,
+        englishLanguageSteering: event.englishLanguageSteering,
+      };
+    case "LATENCY_METRIC":
+      return {
+        ...state,
+        latencyMetrics: {
+          ...state.latencyMetrics,
+          [event.metric.name]: event.metric.durationMs,
+        },
+      };
     case "FAILED":
       return { ...state, status: "error", errorCode: event.code };
     case "ENDED":

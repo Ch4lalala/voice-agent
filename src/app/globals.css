@@ -231,6 +231,13 @@ a { color: inherit; }
 .voice-actions button:not(:disabled):hover { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .voice-actions button span { font-size: 1rem; }
 .voice-guide__note { margin: 0.8rem 0 0; color: var(--color-muted); font-size: 0.73rem; line-height: 1.5; text-align: center; }
+.voice-diagnostics { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: 0.7rem; line-height: 1.45; }
+.voice-diagnostics summary { min-height: 2.75rem; color: var(--color-primary-dark); cursor: pointer; font-weight: 800; }
+.voice-diagnostics p { margin: 0.4rem 0; }
+.voice-diagnostics dl { display: grid; gap: 0.3rem; margin: 0.5rem 0 0; }
+.voice-diagnostics dl > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; }
+.voice-diagnostics dt, .voice-diagnostics dd { margin: 0; }
+.voice-diagnostics dd { color: var(--color-ink); font-variant-numeric: tabular-nums; font-weight: 800; }
 .screen-preview__footer { display: flex; align-items: center; gap: 0.65rem; padding: 0.75rem clamp(1.25rem, 3vw, 2.25rem); border-top: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-canvas) 55%, var(--color-surface)); }
 .screen-preview__footer span { color: var(--color-primary); }
 .screen-preview__footer p { margin: 0; color: var(--color-muted); font-size: 0.72rem; line-height: 1.45; }

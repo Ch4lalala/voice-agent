@@ -39,6 +39,16 @@ describe("voice privacy and prohibited-request safety", () => {
       text: "I can see one field",
       redacted: false,
     });
+    for (const request of [
+      "On this screen, what should I do now?",
+      "What am I supposed to fill in here?",
+      "Which information is missing?",
+      "Explain this page.",
+      "Can you see my screen?",
+      "in this scree what should I do?",
+    ]) {
+      expect(classifyVoiceSafetyIntent(request)).toBeNull();
+    }
   });
 
   it("classifies every prohibited or out-of-scope request deterministically", () => {

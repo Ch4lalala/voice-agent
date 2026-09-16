@@ -1,4 +1,8 @@
 import { createVoiceContextSnapshot, voiceAgentPromptBaseline } from "@/lib/voice-context";
+import {
+  VoiceLatencyTracker,
+  type VoiceLatencyMetric,
+} from "@/lib/voice-latency";
 import { getVoiceSafetyNotice, sanitizeVoiceCaption } from "@/lib/voice-safety";
 import { voiceToolDefinitions, type VoiceToolCall, type VoiceToolExecution } from "@/lib/voice-tools";
 import type { EnrollmentScreenContext } from "@/types/enrollment";
@@ -6,6 +10,7 @@ import type { VoiceClientEvent, VoiceErrorCode } from "@/types/voice";
 
 const VOICE_WEBSOCKET_URL = "wss://agents.assemblyai.com/v1/ws";
 const PCM_SAMPLE_RATE = 24_000;
+const SESSION_END_TIMEOUT_MS = 1_000;
 
 export const voiceSessionConfiguration = {
   type: "session.update",
@@ -17,6 +22,9 @@ export const voiceSessionConfiguration = {
     tools: voiceToolDefinitions,
     input: {
       format: { encoding: "audio/pcm" },
+      transcription_mode: "min_latency",
+      transcription_prompt:
+        "AksesSuara, BPJS, Family Card, healthcare facility, enrollment, Continue, Previous, Review.",
       language_codes: ["en"],
       turn_detection: { interrupt_response: true },
     },
@@ -61,7 +69,7 @@ export interface VoiceRuntime {
   createSocket(token: string): VoiceSocket;
 }
 
-type ControllerPhase = "idle" | "starting" | "active";
+type ControllerPhase = "idle" | "starting" | "active" | "ending";
 
 export type VoiceToolHandler = (call: VoiceToolCall) => VoiceToolExecution;
 
@@ -90,6 +98,33 @@ function safeParseMessage(data: unknown): Record<string, unknown> | null {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolvedConfigurationMetadata(message: Record<string, unknown>): {
+  transcriptionMode: "min_latency" | "balanced" | "max_accuracy" | "unknown";
+  englishLanguageSteering: boolean;
+} | null {
+  if (!isRecord(message.config) || !isRecord(message.config.input)) return null;
+  const input = message.config.input;
+  const transcriptionMode =
+    input.transcription_mode === "min_latency" ||
+    input.transcription_mode === "balanced" ||
+    input.transcription_mode === "max_accuracy"
+      ? input.transcription_mode
+      : "unknown";
+  const englishLanguageSteering =
+    Array.isArray(input.language_codes) && input.language_codes.includes("en");
+  return { transcriptionMode, englishLanguageSteering };
+}
+
+function acknowledgedSystemPrompt(message: Record<string, unknown>): string | null {
+  return isRecord(message.config) && typeof message.config.system_prompt === "string"
+    ? message.config.system_prompt
+    : null;
+}
+
 export class VoiceSessionController {
   private phase: ControllerPhase = "idle";
   private generation = 0;
@@ -99,18 +134,22 @@ export class VoiceSessionController {
   private abortController: AbortController | null = null;
   private providerSessionReady = false;
   private guidanceReady = false;
-  private initialConfigurationPending = false;
+  private socketOpened = false;
+  private sessionEndSent = false;
+  private sessionEndTimer: ReturnType<typeof setTimeout> | null = null;
   private latestContext: ReturnType<typeof createVoiceContextSnapshot> | null = null;
   private contextUpdateInFlight: ReturnType<typeof createVoiceContextSnapshot> | null = null;
   private appliedContextKey: string | null = null;
   private lastProtocolEvent: string | null = null;
   private pendingToolCalls: VoiceToolCall[] = [];
   private handledToolCallIds = new Set<string>();
+  private readonly latency = new VoiceLatencyTracker();
 
   constructor(
     private readonly runtime: VoiceRuntime,
     private readonly emit: (event: VoiceClientEvent) => void,
     private readonly handleTool?: VoiceToolHandler,
+    private readonly diagnosticsEnabled = process.env.NODE_ENV === "development",
   ) {}
 
   updateContext(context: EnrollmentScreenContext): boolean {
@@ -126,6 +165,7 @@ export class VoiceSessionController {
     if (this.phase !== "idle") return false;
 
     this.phase = "starting";
+    if (this.diagnosticsEnabled) this.latency.reset();
     const generation = ++this.generation;
     const abortController = new AbortController();
     this.abortController = abortController;
@@ -143,6 +183,7 @@ export class VoiceSessionController {
 
       const audioSession = await this.runtime.createAudioSession(stream, (audio) => {
         if (!this.isCurrent(generation) || !this.guidanceReady) return;
+        if (this.diagnosticsEnabled) this.latency.recordInputAudio();
         this.send({ type: "input.audio", audio });
       });
       if (!this.isCurrent(generation)) {
@@ -155,13 +196,18 @@ export class VoiceSessionController {
       this.socket = socket;
       socket.onopen = () => {
         if (!this.isCurrent(generation)) return;
-        this.initialConfigurationPending = true;
+        this.socketOpened = true;
         this.send(voiceSessionConfiguration);
       };
       socket.onmessage = (event) => this.handleMessage(generation, event.data);
-      socket.onerror = () => this.fail(generation, "connection-failed");
+      socket.onerror = () => {
+        if (this.phase === "ending") this.completeEnd();
+        else this.fail(generation, "connection-failed");
+      };
       socket.onclose = () => {
-        if (this.isCurrent(generation)) this.fail(generation, "connection-failed");
+        if (!this.isCurrent(generation)) return;
+        if (this.phase === "ending") this.completeEnd();
+        else this.fail(generation, "connection-failed");
       };
       this.phase = "active";
       return true;
@@ -172,11 +218,25 @@ export class VoiceSessionController {
   }
 
   end(): void {
-    if (this.phase === "idle") return;
-    this.generation += 1;
-    this.releaseResources();
-    this.phase = "idle";
-    this.emit({ type: "ENDED" });
+    if (this.phase === "idle" || this.phase === "ending") return;
+    this.phase = "ending";
+    this.guidanceReady = false;
+    this.pendingToolCalls = [];
+    this.audio?.interrupt();
+
+    if (this.socketOpened && this.socket?.readyState === 1) {
+      if (!this.sessionEndSent) {
+        this.sessionEndSent = true;
+        this.send({ type: "session.end" });
+      }
+      this.sessionEndTimer = setTimeout(
+        () => this.completeEnd(),
+        SESSION_END_TIMEOUT_MS,
+      );
+      return;
+    }
+
+    this.completeEnd();
   }
 
   dispose(): void {
@@ -196,13 +256,20 @@ export class VoiceSessionController {
     const message = safeParseMessage(data);
     if (!message || typeof message.type !== "string") return;
 
+    if (message.type === "session.ended") {
+      this.completeEnd();
+      return;
+    }
+    if (this.phase === "ending") return;
+
     switch (message.type) {
       case "session.ready":
         this.providerSessionReady = true;
+        this.emitResolvedConfiguration(message);
         this.sendLatestContextIfReady();
         break;
       case "session.updated":
-        this.handleSessionUpdated();
+        this.handleSessionUpdated(message);
         break;
       case "input.speech.started":
         this.lastProtocolEvent = message.type;
@@ -210,6 +277,9 @@ export class VoiceSessionController {
         this.emit({ type: "USER_SPEECH_STARTED" });
         break;
       case "input.speech.stopped":
+        if (this.diagnosticsEnabled) {
+          this.emitLatency(this.latency.recordSpeechStopped());
+        }
         this.emit({ type: "USER_SPEECH_STOPPED" });
         break;
       case "transcript.user.delta":
@@ -222,17 +292,28 @@ export class VoiceSessionController {
           );
           this.emit({ type: "USER_TRANSCRIPT", text: caption.text });
           if (message.type === "transcript.user") {
+            if (this.diagnosticsEnabled) {
+              this.emitLatency(this.latency.recordFinalTranscript());
+            }
             const notice = getVoiceSafetyNotice(message.text);
             if (notice) this.emit({ type: "SAFETY_NOTICE", message: notice });
           }
         }
         break;
       case "reply.started":
+        if (this.diagnosticsEnabled) {
+          for (const metric of this.latency.recordReplyStarted()) {
+            this.emitLatency(metric);
+          }
+        }
         this.lastProtocolEvent = message.type;
         this.emit({ type: "REPLY_STARTED" });
         break;
       case "reply.audio":
         if (typeof message.data === "string") {
+          if (this.diagnosticsEnabled) {
+            this.emitLatency(this.latency.recordFirstReplyAudio());
+          }
           this.emit({ type: "REPLY_AUDIO" });
           this.audio?.play(message.data);
         }
@@ -246,6 +327,9 @@ export class VoiceSessionController {
         }
         break;
       case "reply.done":
+        if (this.diagnosticsEnabled) {
+          this.emitLatency(this.latency.recordReplyDone());
+        }
         this.lastProtocolEvent = message.type;
         if (message.status === "interrupted") this.audio?.interrupt();
         if (message.status === "interrupted") this.pendingToolCalls = [];
@@ -274,12 +358,23 @@ export class VoiceSessionController {
     this.emit({ type: "FAILED", code });
   }
 
+  private completeEnd(): void {
+    if (this.phase === "idle") return;
+    this.generation += 1;
+    this.releaseResources();
+    this.phase = "idle";
+    this.emit({ type: "ENDED" });
+  }
+
   private releaseResources(): void {
     this.abortController?.abort();
     this.abortController = null;
     this.providerSessionReady = false;
     this.guidanceReady = false;
-    this.initialConfigurationPending = false;
+    this.socketOpened = false;
+    this.sessionEndSent = false;
+    if (this.sessionEndTimer) clearTimeout(this.sessionEndTimer);
+    this.sessionEndTimer = null;
     this.contextUpdateInFlight = null;
     this.appliedContextKey = null;
     this.lastProtocolEvent = null;
@@ -304,14 +399,14 @@ export class VoiceSessionController {
     this.stream = null;
   }
 
-  private handleSessionUpdated(): void {
-    if (this.initialConfigurationPending) {
-      this.initialConfigurationPending = false;
-      this.sendLatestContextIfReady();
+  private handleSessionUpdated(message: Record<string, unknown>): void {
+    if (!this.contextUpdateInFlight) return;
+    if (
+      acknowledgedSystemPrompt(message) !==
+      this.contextUpdateInFlight.systemPrompt
+    ) {
       return;
     }
-
-    if (!this.contextUpdateInFlight) return;
 
     this.appliedContextKey = this.contextUpdateInFlight.semanticKey;
     this.contextUpdateInFlight = null;
@@ -331,7 +426,6 @@ export class VoiceSessionController {
     if (
       this.phase !== "active" ||
       !this.providerSessionReady ||
-      this.initialConfigurationPending ||
       this.contextUpdateInFlight ||
       !this.latestContext ||
       this.latestContext.semanticKey === this.appliedContextKey
@@ -351,6 +445,7 @@ export class VoiceSessionController {
     if (this.handledToolCallIds.has(message.call_id)) return;
 
     this.handledToolCallIds.add(message.call_id);
+    if (this.diagnosticsEnabled) this.latency.recordToolCall();
     this.pendingToolCalls.push({
       callId: message.call_id,
       name: message.name,
@@ -394,8 +489,22 @@ export class VoiceSessionController {
         result: JSON.stringify(execution.result),
         is_error: execution.result.status === "blocked",
       });
+      if (this.diagnosticsEnabled) {
+        this.emitLatency(this.latency.recordToolResult());
+      }
       this.emit({ type: "TOOL_FEEDBACK", message: execution.feedback });
     }
+  }
+
+  private emitLatency(metric: VoiceLatencyMetric | null): void {
+    if (metric) this.emit({ type: "LATENCY_METRIC", metric });
+  }
+
+  private emitResolvedConfiguration(message: Record<string, unknown>): void {
+    if (!this.diagnosticsEnabled) return;
+    const metadata = resolvedConfigurationMetadata(message);
+    if (!metadata) return;
+    this.emit({ type: "SESSION_CONFIGURATION", ...metadata });
   }
 }
 

@@ -158,10 +158,50 @@ describe("sanitized enrollment context for voice guidance", () => {
     expect(snapshot.systemPrompt).toContain("please do not say that value aloud");
     expect(snapshot.systemPrompt).toContain("solve or bypass CAPTCHA");
     expect(snapshot.systemPrompt).toContain("official BPJS Kesehatan support channels");
+    expect(snapshot.systemPrompt).toContain(
+      "Treat CURRENT SCREEN CONTEXT as the authoritative description of what is visible",
+    );
+    expect(snapshot.systemPrompt).toContain(
+      "Never say that you cannot read or see the screen",
+    );
+    expect(snapshot.systemPrompt).toContain(
+      "CURRENT SCREEN CONTEXT (verified structured application information)",
+    );
     expect(JSON.stringify(state)).toBe(before);
     expect(voiceSessionConfiguration.session.tools).toHaveLength(8);
     expect(
       voiceSessionConfiguration.session.tools.map((tool) => tool.name),
     ).not.toContain("select_facility");
+  });
+
+  it("covers common and typo-tolerant screen-awareness requests", () => {
+    const prompt = createVoiceAgentSystemPrompt(
+      createEnrollmentScreenContext(statesForEveryScreen()[1]),
+    );
+
+    for (const request of [
+      "On this screen, what should I do now?",
+      "What am I supposed to fill in here?",
+      "Which information is missing?",
+      "Explain this page.",
+      "in this scree what should I do?",
+      "Can you see my screen?",
+    ]) {
+      expect(prompt).toContain(request);
+    }
+    expect(prompt).toContain(
+      "explain the current screen using its supplied field labels, completion state, and allowed next action",
+    );
+    expect(prompt).toContain(
+      "you receive verified structured screen information from the application",
+    );
+    expect(prompt).toContain("do not navigate while explaining");
+  });
+
+  it("keeps screen explanation available without requiring navigation", () => {
+    for (const state of statesForEveryScreen()) {
+      const context = createEnrollmentScreenContext(state);
+      expect(context.allowedActions).toContain("explain_current_screen");
+    }
   });
 });

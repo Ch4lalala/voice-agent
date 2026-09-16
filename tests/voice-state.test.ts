@@ -82,4 +82,26 @@ describe("Voice Guide lifecycle", () => {
     expect(voiceState.status).toBe("error");
     expect(enrollmentState).toEqual(createInitialEnrollmentState());
   });
+
+  it("stores development-safe configuration and timing metadata only", () => {
+    let state = voiceStateReducer(initialVoiceState, {
+      type: "SESSION_CONFIGURATION",
+      transcriptionMode: "min_latency",
+      englishLanguageSteering: true,
+    });
+    state = voiceStateReducer(state, {
+      type: "LATENCY_METRIC",
+      metric: {
+        name: "speech-stopped-to-final-transcript",
+        durationMs: 125.4,
+      },
+    });
+
+    expect(state.resolvedTranscriptionMode).toBe("min_latency");
+    expect(state.englishLanguageSteering).toBe(true);
+    expect(state.latencyMetrics).toEqual({
+      "speech-stopped-to-final-transcript": 125.4,
+    });
+    expect(JSON.stringify(state)).not.toMatch(/transcript text|token|system_prompt/i);
+  });
 });
