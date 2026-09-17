@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   VoiceSessionController,
   voiceSessionConfiguration,
+  type InitialGreetingCompleteHandler,
   type VoiceAudioSession,
   type VoiceMediaStream,
   type VoiceRuntime,
@@ -26,12 +27,14 @@ function deferred<T>() {
 function createHarness(
   overrides: Partial<VoiceRuntime> = {},
   handleTool?: VoiceToolHandler,
+  handleInitialGreetingComplete?: InitialGreetingCompleteHandler,
 ) {
   const stop = vi.fn();
   const stream: VoiceMediaStream = { getTracks: () => [{ stop }] };
   const audio: VoiceAudioSession = {
     play: vi.fn(),
     interrupt: vi.fn(),
+    waitForPlaybackComplete: vi.fn().mockResolvedValue(undefined),
     close: vi.fn(),
   };
   const socket: VoiceSocket = {
@@ -61,6 +64,7 @@ function createHarness(
     runtime,
     (event) => events.push(event),
     handleTool,
+    handleInitialGreetingComplete,
   );
   return {
     audio,
@@ -131,7 +135,373 @@ function endCleanly(harness: ReturnType<typeof createHarness>) {
   harness.socket.onmessage?.({ data: JSON.stringify({ type: "session.ended" }) });
 }
 
+function createGuidedStartHarness() {
+  let enrollmentState = createInitialEnrollmentState();
+  const completeGreeting = vi.fn(() => {
+    if (enrollmentState.screenId !== "welcome") return false;
+    enrollmentState = enrollmentReducer(enrollmentState, {
+      type: "START_MANUAL",
+    });
+    harness.controller.updateContext(
+      createEnrollmentScreenContext(enrollmentState),
+    );
+    return true;
+  });
+  const harness = createHarness({}, undefined, completeGreeting);
+  return {
+    completeGreeting,
+    getEnrollmentState: () => enrollmentState,
+    harness,
+    returnToWelcome() {
+      enrollmentState = enrollmentReducer(enrollmentState, { type: "PREVIOUS" });
+      harness.controller.updateContext(
+        createEnrollmentScreenContext(enrollmentState),
+      );
+    },
+  };
+}
+
+async function startWelcomeGuidance(
+  harness: ReturnType<typeof createHarness>,
+): Promise<void> {
+  harness.controller.updateContext(welcomeContext);
+  await harness.controller.start({ autoAdvanceFromWelcome: true });
+  harness.socket.onopen?.();
+  const initialUpdate = JSON.parse(
+    String(vi.mocked(harness.socket.send).mock.calls[0][0]),
+  ) as { session: Record<string, unknown> };
+  harness.socket.onmessage?.({
+    data: JSON.stringify({
+      type: "session.ready",
+      config: initialUpdate.session,
+    }),
+  });
+}
+
+async function finishInitialGreeting(
+  harness: ReturnType<typeof createHarness>,
+  replyId = "reply-initial-greeting",
+): Promise<void> {
+  harness.socket.onmessage?.({
+    data: JSON.stringify({ type: "reply.started", reply_id: replyId }),
+  });
+  harness.socket.onmessage?.({
+    data: JSON.stringify({ type: "reply.audio", reply_id: replyId, data: "AA==" }),
+  });
+  harness.socket.onmessage?.({
+    data: JSON.stringify({
+      type: "reply.done",
+      reply_id: replyId,
+      status: "completed",
+    }),
+  });
+  await Promise.resolve();
+}
+
 describe("VoiceSessionController", () => {
+  it("transitions from Welcome to Requirements once after the completed greeting", async () => {
+    const guided = createGuidedStartHarness();
+    await startWelcomeGuidance(guided.harness);
+    await finishInitialGreeting(guided.harness);
+    await vi.waitFor(() => expect(guided.completeGreeting).toHaveBeenCalledOnce());
+
+    expect(guided.getEnrollmentState().screenId).toBe("requirements");
+    const contextUpdates = vi.mocked(guided.harness.socket.send).mock.calls
+      .map(([raw]) => JSON.parse(String(raw)) as {
+        type: string;
+        session?: { system_prompt?: string };
+      })
+      .filter((message) => message.type === "session.update");
+    expect(contextUpdates.at(-1)?.session?.system_prompt).toContain(
+      "Screen identifier: requirements",
+    );
+
+    acknowledgeLatestContext(guided.harness);
+    expect(guided.harness.events).toContainEqual({
+      type: "GUIDED_JOURNEY_READY",
+    });
+    endCleanly(guided.harness);
+  });
+
+  it("waits for greeting completion and local playback drain before transitioning", async () => {
+    const playback = deferred<void>();
+    const guided = createGuidedStartHarness();
+    vi.mocked(guided.harness.audio.waitForPlaybackComplete).mockReturnValue(
+      playback.promise,
+    );
+    await startWelcomeGuidance(guided.harness);
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.started",
+        reply_id: "reply-greeting-drain",
+      }),
+    });
+
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.done",
+        reply_id: "reply-greeting-drain",
+        status: "completed",
+      }),
+    });
+    await Promise.resolve();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+
+    playback.resolve();
+    await vi.waitFor(() =>
+      expect(guided.getEnrollmentState().screenId).toBe("requirements"),
+    );
+    endCleanly(guided.harness);
+  });
+
+  it("ignores duplicate greeting completion events", async () => {
+    const playback = deferred<void>();
+    const guided = createGuidedStartHarness();
+    vi.mocked(guided.harness.audio.waitForPlaybackComplete).mockReturnValue(
+      playback.promise,
+    );
+    await startWelcomeGuidance(guided.harness);
+    await finishInitialGreeting(guided.harness, "reply-greeting-once");
+
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.done",
+        reply_id: "reply-greeting-once",
+        status: "completed",
+      }),
+    });
+    await Promise.resolve();
+
+    expect(guided.completeGreeting).not.toHaveBeenCalled();
+    expect(guided.harness.events.at(-1)).toEqual({ type: "REPLY_AUDIO" });
+
+    playback.resolve();
+    await vi.waitFor(() => expect(guided.completeGreeting).toHaveBeenCalledOnce());
+
+    expect(guided.completeGreeting).toHaveBeenCalledOnce();
+    expect(guided.getEnrollmentState().screenId).toBe("requirements");
+    endCleanly(guided.harness);
+  });
+
+  it("does not auto-transition after an interrupted greeting", async () => {
+    const guided = createGuidedStartHarness();
+    await startWelcomeGuidance(guided.harness);
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.started",
+        reply_id: "reply-greeting-interrupted",
+      }),
+    });
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.done",
+        reply_id: "reply-greeting-interrupted",
+        status: "interrupted",
+      }),
+    });
+
+    expect(guided.completeGreeting).not.toHaveBeenCalled();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+    expect(guided.harness.audio.interrupt).toHaveBeenCalled();
+    endCleanly(guided.harness);
+  });
+
+  it("does not auto-transition after a connection failure", async () => {
+    const completeGreeting = vi.fn<InitialGreetingCompleteHandler>(() => true);
+    const harness = createHarness({}, undefined, completeGreeting);
+    harness.controller.updateContext(welcomeContext);
+    await harness.controller.start({ autoAdvanceFromWelcome: true });
+    harness.socket.onopen?.();
+    harness.socket.onerror?.();
+
+    expect(completeGreeting).not.toHaveBeenCalled();
+    expect(harness.events.at(-1)).toEqual({
+      type: "FAILED",
+      code: "connection-failed",
+    });
+  });
+
+  it("does not auto-transition after temporary-token creation fails", async () => {
+    const completeGreeting = vi.fn<InitialGreetingCompleteHandler>(() => true);
+    const harness = createHarness(
+      {
+        requestToken: vi.fn().mockRejectedValue(new Error("voice-token-failed")),
+      },
+      undefined,
+      completeGreeting,
+    );
+    harness.controller.updateContext(welcomeContext);
+
+    await harness.controller.start({ autoAdvanceFromWelcome: true });
+
+    expect(completeGreeting).not.toHaveBeenCalled();
+    expect(harness.events.at(-1)).toEqual({
+      type: "FAILED",
+      code: "connection-failed",
+    });
+  });
+
+  it("does not auto-transition after microphone permission denial", async () => {
+    const completeGreeting = vi.fn<InitialGreetingCompleteHandler>(() => true);
+    const harness = createHarness(
+      {
+        requestMicrophone: vi
+          .fn()
+          .mockRejectedValue(new DOMException("Permission denied", "NotAllowedError")),
+      },
+      undefined,
+      completeGreeting,
+    );
+    harness.controller.updateContext(welcomeContext);
+
+    await harness.controller.start({ autoAdvanceFromWelcome: true });
+
+    expect(completeGreeting).not.toHaveBeenCalled();
+    expect(harness.events.at(-1)).toEqual({
+      type: "FAILED",
+      code: "permission-denied",
+    });
+  });
+
+  it("does not auto-transition when greeting playback fails", async () => {
+    const guided = createGuidedStartHarness();
+    vi.mocked(guided.harness.audio.play).mockImplementation(() => {
+      throw new Error("audio-playback-failed");
+    });
+    await startWelcomeGuidance(guided.harness);
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.started",
+        reply_id: "reply-greeting-playback-failure",
+      }),
+    });
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.audio",
+        reply_id: "reply-greeting-playback-failure",
+        data: "AA==",
+      }),
+    });
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({
+        type: "reply.done",
+        reply_id: "reply-greeting-playback-failure",
+        status: "completed",
+      }),
+    });
+
+    expect(guided.completeGreeting).not.toHaveBeenCalled();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+    expect(guided.harness.events.at(-1)).toEqual({
+      type: "FAILED",
+      code: "connection-failed",
+    });
+  });
+
+  it("does not auto-transition when guidance ends during the greeting", async () => {
+    const playback = deferred<void>();
+    const guided = createGuidedStartHarness();
+    vi.mocked(guided.harness.audio.waitForPlaybackComplete).mockReturnValue(
+      playback.promise,
+    );
+    await startWelcomeGuidance(guided.harness);
+    await finishInitialGreeting(guided.harness, "reply-greeting-ended");
+    guided.harness.controller.end();
+    playback.resolve();
+    guided.harness.socket.onmessage?.({
+      data: JSON.stringify({ type: "session.ended" }),
+    });
+    await Promise.resolve();
+
+    expect(guided.completeGreeting).not.toHaveBeenCalled();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+  });
+
+  it("ignores stale greeting events from a finished session", async () => {
+    const guided = createGuidedStartHarness();
+    await startWelcomeGuidance(guided.harness);
+    const staleMessageHandler = guided.harness.socket.onmessage;
+    endCleanly(guided.harness);
+
+    staleMessageHandler?.({
+      data: JSON.stringify({
+        type: "reply.started",
+        reply_id: "reply-stale-greeting",
+      }),
+    });
+    staleMessageHandler?.({
+      data: JSON.stringify({
+        type: "reply.done",
+        reply_id: "reply-stale-greeting",
+        status: "completed",
+      }),
+    });
+    await Promise.resolve();
+
+    expect(guided.completeGreeting).not.toHaveBeenCalled();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+  });
+
+  it("does not auto-transition when guidance starts outside Welcome", async () => {
+    const completeGreeting = vi.fn<InitialGreetingCompleteHandler>(() => true);
+    const harness = createHarness({}, undefined, completeGreeting);
+    harness.controller.updateContext(requirementsContext);
+    await harness.controller.start({ autoAdvanceFromWelcome: true });
+    harness.socket.onopen?.();
+    const initialUpdate = JSON.parse(
+      String(vi.mocked(harness.socket.send).mock.calls[0][0]),
+    ) as { session: Record<string, unknown> };
+    harness.socket.onmessage?.({
+      data: JSON.stringify({ type: "session.ready", config: initialUpdate.session }),
+    });
+    await finishInitialGreeting(harness, "reply-not-welcome");
+
+    expect(completeGreeting).not.toHaveBeenCalled();
+    endCleanly(harness);
+  });
+
+  it("does not auto-transition again after returning to Welcome in the same session", async () => {
+    const guided = createGuidedStartHarness();
+    await startWelcomeGuidance(guided.harness);
+    await finishInitialGreeting(guided.harness, "reply-first-greeting");
+    await vi.waitFor(() => expect(guided.completeGreeting).toHaveBeenCalledOnce());
+    acknowledgeLatestContext(guided.harness);
+
+    guided.returnToWelcome();
+    acknowledgeLatestContext(guided.harness);
+    await finishInitialGreeting(guided.harness, "reply-later-agent-turn");
+
+    expect(guided.completeGreeting).toHaveBeenCalledOnce();
+    expect(guided.getEnrollmentState().screenId).toBe("welcome");
+    endCleanly(guided.harness);
+  });
+
+  it("keeps microphone audio gated until Requirements context is acknowledged", async () => {
+    const guided = createGuidedStartHarness();
+    await startWelcomeGuidance(guided.harness);
+    await finishInitialGreeting(guided.harness, "reply-gated-transition");
+    await vi.waitFor(() => expect(guided.completeGreeting).toHaveBeenCalledOnce());
+
+    const audioMessageCount = () =>
+      vi.mocked(guided.harness.socket.send).mock.calls.filter(([raw]) =>
+        String(raw).includes('"type":"input.audio"'),
+      ).length;
+    guided.harness.pushAudioChunk();
+    expect(audioMessageCount()).toBe(0);
+    expect(guided.harness.events).not.toContainEqual({
+      type: "GUIDED_JOURNEY_READY",
+    });
+
+    acknowledgeLatestContext(guided.harness);
+    guided.harness.pushAudioChunk();
+    expect(audioMessageCount()).toBe(1);
+    expect(guided.harness.events.at(-1)).toEqual({
+      type: "GUIDED_JOURNEY_READY",
+    });
+    endCleanly(guided.harness);
+  });
+
   it("prevents duplicate sessions while a start is pending", async () => {
     const microphone = deferred<VoiceMediaStream>();
     const harness = createHarness({ requestMicrophone: () => microphone.promise });

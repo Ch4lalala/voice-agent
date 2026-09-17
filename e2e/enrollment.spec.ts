@@ -10,7 +10,9 @@ const demo = {
 
 async function continueWithoutVoice(page: Page) {
   await page.getByRole("button", { name: "Continue Without Voice" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Prepare your documents");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText("Prepare your documents");
+  await expect(heading).toBeFocused();
 }
 
 async function completeRequirements(page: Page) {
@@ -114,6 +116,177 @@ async function tabTo(page: Page, locator: Locator, maximumTabs = 30) {
   }
   throw new Error(`Keyboard focus did not reach ${await locator.getAttribute("id") ?? "target"}.`);
 }
+
+async function installMockGreetingBoundary(page: Page) {
+  await page.route("**/api/voice/token", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-only-temporary-token" }),
+    });
+  });
+  await page.evaluate(() => {
+    const sendEvent = (
+      socket: { onmessage: ((event: { data: string }) => void) | null },
+      message: object,
+    ) => socket.onmessage?.({ data: JSON.stringify(message) });
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({
+          getTracks: () => [{ stop: () => undefined }],
+        }),
+      },
+    });
+
+    class MockAudioWorkletNode {
+      port = { onmessage: null as ((event: { data: ArrayBuffer }) => void) | null };
+      connect(node: unknown) { return node; }
+      disconnect() { return undefined; }
+    }
+
+    class MockAudioContext {
+      currentTime = 0;
+      sampleRate = 24_000;
+      destination = {};
+      audioWorklet = { addModule: async () => undefined };
+      createMediaStreamSource() {
+        return {
+          connect: (node: unknown) => node,
+          disconnect: () => undefined,
+        };
+      }
+      createGain() {
+        return {
+          gain: { value: 0 },
+          connect: (node: unknown) => node,
+          disconnect: () => undefined,
+        };
+      }
+      createBuffer() {
+        return { copyToChannel: () => undefined, duration: 0.01 };
+      }
+      createBufferSource() {
+        const source = {
+          buffer: null,
+          onended: null as (() => void) | null,
+          connect: () => undefined,
+          start: () => window.setTimeout(() => source.onended?.(), 0),
+          stop: () => source.onended?.(),
+        };
+        return source;
+      }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    }
+
+    class MockWebSocket {
+      static readonly OPEN = 1;
+      readyState = MockWebSocket.OPEN;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      private configured = false;
+
+      constructor() {
+        window.setTimeout(() => this.onopen?.(), 0);
+      }
+
+      send(raw: string) {
+        const message = JSON.parse(raw) as {
+          type: string;
+          session?: { system_prompt?: string };
+        };
+        if (message.type === "session.end") {
+          sendEvent(this, { type: "session.ended" });
+          return;
+        }
+        if (message.type !== "session.update") return;
+
+        if (!this.configured) {
+          this.configured = true;
+          window.setTimeout(() => {
+            sendEvent(this, {
+              type: "session.ready",
+              session_id: "test-session",
+              config: message.session,
+            });
+            window.setTimeout(() => {
+              const replyId = "reply-test-greeting";
+              sendEvent(this, { type: "reply.started", reply_id: replyId });
+              sendEvent(this, {
+                type: "reply.audio",
+                reply_id: replyId,
+                data: "AAA=",
+              });
+              sendEvent(this, {
+                type: "transcript.agent",
+                reply_id: replyId,
+                text: "Hello. I’m AksesSuara.",
+                interrupted: false,
+              });
+              sendEvent(this, {
+                type: "reply.done",
+                reply_id: replyId,
+                status: "completed",
+              });
+              sendEvent(this, {
+                type: "reply.done",
+                reply_id: replyId,
+                status: "completed",
+              });
+            }, 0);
+          }, 0);
+          return;
+        }
+
+        window.setTimeout(
+          () => sendEvent(this, {
+            type: "session.updated",
+            config: { system_prompt: message.session?.system_prompt },
+          }),
+          0,
+        );
+      }
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: MockAudioContext,
+    });
+    Object.defineProperty(window, "AudioWorkletNode", {
+      configurable: true,
+      value: MockAudioWorkletNode,
+    });
+    Object.defineProperty(window, "WebSocket", {
+      configurable: true,
+      value: MockWebSocket,
+    });
+  });
+}
+
+test("moves once to Requirements after the acknowledged greeting finishes", async ({ page }) => {
+  await page.goto("/");
+  await installMockGreetingBoundary(page);
+  const startButton = page
+    .locator("button.button--primary")
+    .filter({ hasText: "Start Voice Guidance" });
+  await startButton.click();
+
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText("Prepare your documents");
+  await expect(heading).toBeFocused();
+  await expect(page.locator('[aria-live="polite"]')).toHaveText(
+    "Requirements, step 1 of 5.",
+  );
+  await expect(page.locator('[data-context-screen="requirements"]')).toHaveCount(1);
+  await expect(page.getByLabel("Voice Guide status: Listening")).toBeVisible();
+});
 
 test("completes and resets the deterministic demo without an official request", async ({ page }) => {
   const requests: Array<{ method: string; url: string }> = [];

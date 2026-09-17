@@ -43,6 +43,13 @@ export function voiceStateReducer(
       return { ...state, agentCaption: event.text };
     case "REPLY_DONE":
       return { ...state, status: "listening", errorCode: null };
+    case "GUIDED_JOURNEY_READY":
+      return {
+        ...state,
+        status: "listening",
+        errorCode: null,
+        guidanceMessage: "Requirements, step 1 of 5.",
+      };
     case "TOOL_FEEDBACK":
       return {
         ...state,

@@ -55,8 +55,8 @@ export function WelcomeScreen({ onContinue }: WelcomeScreenProps) {
             Continue Without Voice
           </button>
           <span id="voice-phase-note" className="action-row__note">
-            Starting voice will ask for microphone access. Verified voice actions may focus,
-            validate, or move one step; your entries and important choices remain yours.
+            Starting voice will ask for microphone access. After the greeting finishes,
+            guidance begins on Requirements. Your entries and important choices remain yours.
           </span>
         </div>
 

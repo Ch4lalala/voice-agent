@@ -35,6 +35,14 @@ function completeEnrollment(): EnrollmentState {
 }
 
 describe("deterministic enrollment state machine", () => {
+  it("keeps Continue Without Voice as the direct Welcome to Requirements transition", () => {
+    const welcome = createInitialEnrollmentState();
+    const requirements = enrollmentReducer(welcome, { type: "START_MANUAL" });
+
+    expect(requirements.screenId).toBe("requirements");
+    expect(requirements.data).toEqual(welcome.data);
+  });
+
   it("starts manually and ignores attempts to skip an incomplete step", () => {
     const welcome = createInitialEnrollmentState();
     expect(enrollmentReducer(welcome, { type: "NEXT" })).toBe(welcome);

@@ -81,7 +81,7 @@
 | Status changes announced accessibly | Pass | Component live-region tests | One polite region; visible error uses one alert. |
 | Usable at 320-pixel width | Pass | Playwright 320×800 matrix | No horizontal overflow or clipped tested content. |
 | No critical overlap at mobile/desktop widths | Pass | Four-viewport Playwright matrix | Natural scrolling, readable captions/actions. |
-| Lint, type-check, tests, build pass | Pass | Final `npm run check`: 10 Vitest files / 91 tests plus successful Next.js production build | ESLint and strict TypeScript were clean. |
+| Lint, type-check, tests, build pass | Pass | Final `npm run check`: 10 Vitest files / 107 tests plus successful Next.js production build | ESLint and strict TypeScript were clean. |
 
 ## Phase 7 browser coverage
 
@@ -89,3 +89,16 @@
 - Every screen: automated axe WCAG A/AA scan, document overflow, horizontal clipping, and effective enabled-target size.
 - Additional paths: first-invalid focus/description, keyboard-only journey, masking after blur, explicit facility confirmation, Review, completion, reset, reduced motion, and 200% CSS zoom-equivalent reflow.
 - Real voice calls are intentionally excluded from automation. The complete manual voice matrix above is now verified using user-observed short browser sessions with dummy data.
+- The post-MVP suite now contains 9 Chromium tests; its additional provider-boundary test is deterministic and does not claim real-audio verification.
+
+## Post-MVP guided-start regression
+
+| Check | Status | Evidence or remaining action |
+|---|---|---|
+| Completed initial greeting moves Welcome → Requirements exactly once | Pass (automated) | Controller and mocked-browser tests use an explicit greeting `reply_id` and duplicate `reply.done`. |
+| Transition waits for greeting completion and local playback drain | Pass (automated) | Deferred-playback controller test. |
+| Interrupted, ended, failed, denied, stale, or non-Welcome starts do not navigate | Pass (automated) | Controller lifecycle regression tests. |
+| Requirements context is acknowledged before microphone upload resumes | Pass (automated) | Context-gate controller test and mocked-browser flow. |
+| Requirements heading focus and polite step announcement | Pass (automated) | Playwright and component/reducer assertions. |
+| Continue Without Voice and manual return to Welcome remain unchanged | Pass (automated) | Enrollment reducer/controller tests. |
+| Real greeting finishes, then the browser moves exactly once to Requirements | Pending live verification | Requires the user’s short real-microphone browser check; automation does not claim provider playback verification. |

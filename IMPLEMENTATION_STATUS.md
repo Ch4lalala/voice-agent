@@ -1,6 +1,6 @@
 # AksesSuara Implementation Status
 
-Last updated: September 16, 2026
+Last updated: September 17, 2026
 
 ## Current phase
 
@@ -13,7 +13,7 @@ Last updated: September 16, 2026
 - **Phase 6 — Privacy, safety, and resilience:** Complete
 - **Phase 7 — Accessibility, testing, and demo polish:** Complete
 
-Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, failure paths, latency/screen-awareness correction, tool-result continuation correction, automated verification, and user-performed real-microphone regression verification are complete. Phase 7 implementation, automated verification, and the final user-performed real-audio acceptance checks are complete. The AksesSuara hackathon MVP is fully implemented and fully live-verified.
+Phase 3 implementation, automated checks, secure temporary-token flow, and manual live browser verification are complete. Phase 4 implementation, automated checks, and the required manual screen-awareness conversation are also complete. Phase 5 implementation, automated checks, non-voice browser verification, and the user-performed live microphone/tool checklist are complete. Phase 6 privacy, safety, resilience, failure paths, latency/screen-awareness correction, tool-result continuation correction, automated verification, and user-performed real-microphone regression verification are complete. Phase 7 implementation, automated verification, and the final user-performed real-audio acceptance checks are complete. The original hackathon MVP remains fully implemented and fully live-verified. The post-MVP guided-start improvement is implemented and automated-verified; its production voice behavior is pending the focused real-browser check documented below.
 
 ## Repository condition before Phase 0
 
@@ -644,3 +644,39 @@ Modified for Phase 7 or reconciled with the existing Phase 6 work:
 - **Phase 7:** Complete. All acceptance criteria and manual voice scenarios are verified as passed.
 - **Hackathon MVP:** Fully implemented and fully live-verified.
 - No later phase exists in the current PRD. Any future work requires separate approval and scope.
+
+## Post-MVP Voice Guidance guided-start improvement
+
+- **Repository condition before implementation:** the worktree contained the approved uncommitted Phase 0–7 implementation and documentation. Those changes and unrelated user work were preserved; no branch, commit, push, publish, or deployment action was performed.
+- Starting Voice Guidance on Welcome now arms an explicit per-session initial-greeting lifecycle. The controller identifies the first real greeting by `reply_id`; a matching completed `reply.done`, an acknowledged Welcome context, and fully drained local playback are all required before navigation can be requested.
+- The transition is not an agent tool. The provider calls the enrollment workflow, which verifies that Welcome is still active and dispatches the existing deterministic `START_MANUAL` event. This moves exactly one step to Requirements and preserves the manual **Continue Without Voice** path.
+- The initial full session configuration now contains the latest complete baseline-plus-screen prompt. `session.ready` acknowledges it when echoed; mismatches use the existing serialized mutable system-prompt update path.
+- After the reducer moves to Requirements, microphone upload remains gated until the matching complete Requirements context receives `session.updated`. Normal Listening then resumes, the Requirements heading has focus, and the existing polite live region announces “Requirements, step 1 of 5.”
+- Interrupted, cancelled, failed, duplicate, stale, or later replies cannot trigger the transition. Token, permission, connection, acknowledgement, playback, or End Guidance failure leaves the workflow on Welcome. Starting or retrying on another screen never navigates. Returning to Welcome in the same active session does not re-arm the behavior.
+- A hydration-safe, idempotent controller factory ensures that an explicit Start action cannot be dropped if it arrives at the first client interaction boundary; it still permits only one active controller/session.
+- Official AssemblyAI Voice Agent documentation was used for the inline greeting configuration and immutable greeting behavior, the `session.ready` / `session.updated` acknowledgement shapes, and the `reply.started` / `reply.audio` / `reply.done` event sequence. No new API, tool, provider, persistence, backend, language, or enrollment capability was added.
+
+### Post-MVP automated verification
+
+- Added controller regression coverage for completed-greeting timing, playback drain, duplicate completion, interruption, connection failure, microphone denial, End Guidance, stale-session events, non-Welcome starts, same-session return to Welcome, and the Requirements acknowledgement audio gate.
+- Added fail-closed coverage for temporary-token creation and local greeting-playback failure; neither can navigate or leave media resources active.
+- Added reducer/component coverage for the unchanged Continue Without Voice route and the exact polite announcement.
+- Added a test-only Playwright provider boundary that uses no real credential and confirms the completed greeting moves exactly once, focuses Requirements, exposes the Requirements context, and resumes Listening after acknowledgement.
+- `npm run check` — passed: ESLint clean; strict TypeScript clean; Vitest passed **10 files / 107 tests**; Next.js 16.3.5 production build completed with `/api/voice/token` dynamic.
+- `npm run test:e2e` against `next dev` — passed **9/9** in 32.4 seconds.
+- `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3110 npm run test:e2e` against `next start` — passed **9/9** in 26.4 seconds; the temporary production server was stopped cleanly.
+- Existing axe/layout coverage passed at 320×800, 375×812, 768×1024, and 1440×900. Keyboard-only enrollment, reduced motion, 200% CSS zoom-equivalent reflow, permission-denial recovery, masking, confirmation, reset, and the complete deterministic workflow remain green.
+- Strict premium UI audit passed with 0 findings. `DESIGN.md` lint passed with 0 errors and 0 warnings. `npm audit --omit=dev` reported 0 vulnerabilities. `git diff --check` passed.
+- Credential-marker, approved-sensitive-fixture, persistence, logging/native-dialog, production-diagnostics, artificial-delay, and official-integration scans passed. `.env.local` remains ignored and was never opened or displayed.
+
+### Post-MVP files changed
+
+- Voice/session behavior: `src/lib/voice-agent-client.ts`, `src/lib/voice-context.ts`, `src/lib/voice-state.ts`, `src/types/voice.ts`, `src/components/voice/VoiceGuideProvider.tsx`, `src/components/enrollment/EnrollmentWorkflow.tsx`, and `src/components/enrollment/screens/WelcomeScreen.tsx`.
+- Regression coverage: `tests/voice-session-controller.test.ts`, `tests/enrollment-machine.test.ts`, `tests/enrollment-components.test.tsx`, `tests/voice-state.test.ts`, and `e2e/enrollment.spec.ts`.
+- Behavior documentation: `README.md`, `DEMO_GUIDE.md`, `QA_CHECKLIST.md`, `UX-CONTRACT.md`, `DESIGN.md`, and this status file.
+- Generated by the required Next.js production build: `next-env.d.ts`.
+- No dependency, lockfile, environment-example, token-route, validation-rule, tool-allowlist, or persistence change was made.
+
+### Live verification status
+
+- **Pending:** automation cannot prove audible provider greeting completion. Production behavior must not be described as live-verified until the user confirms the focused real-browser checklist in `DEMO_GUIDE.md`.

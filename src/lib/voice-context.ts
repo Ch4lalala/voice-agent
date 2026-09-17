@@ -75,10 +75,12 @@ ${fields}`;
 }
 
 export function createVoiceContextSnapshot(context: EnrollmentScreenContext): {
+  screenId: EnrollmentScreenContext["screenId"];
   semanticKey: string;
   systemPrompt: string;
 } {
   return {
+    screenId: context.screenId,
     semanticKey: serializeEnrollmentScreenContext(context),
     systemPrompt: createVoiceAgentSystemPrompt(context),
   };

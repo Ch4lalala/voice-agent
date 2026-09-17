@@ -97,4 +97,14 @@ describe("Voice Guide lifecycle", () => {
     expect(state.status).toBe("off");
     expect(state.guidanceMessage).toContain("enrollment information is unchanged");
   });
+
+  it("announces Requirements once normal listening resumes after the greeting", () => {
+    const state = voiceStateReducer(
+      { ...initialVoiceState, status: "speaking" },
+      { type: "GUIDED_JOURNEY_READY" },
+    );
+
+    expect(state.status).toBe("listening");
+    expect(state.guidanceMessage).toBe("Requirements, step 1 of 5.");
+  });
 });

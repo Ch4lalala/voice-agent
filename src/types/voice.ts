@@ -34,6 +34,7 @@ export type VoiceStateEvent =
   | { type: "REPLY_AUDIO" }
   | { type: "AGENT_TRANSCRIPT"; text: string }
   | { type: "REPLY_DONE" }
+  | { type: "GUIDED_JOURNEY_READY" }
   | {
       type: "TOOL_FEEDBACK";
       kind: "success" | "attention";

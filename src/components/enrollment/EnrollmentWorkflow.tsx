@@ -47,7 +47,11 @@ function EnrollmentWorkflowContent() {
   const stateRef = useRef(state);
   const speechPreferenceRef = useRef(speechPreference);
   const screenContext = createEnrollmentScreenContext(state, speechPreference);
-  const { registerToolHandler, syncContext } = useVoiceGuide();
+  const {
+    registerInitialGreetingHandler,
+    registerToolHandler,
+    syncContext,
+  } = useVoiceGuide();
 
   useEffect(() => {
     stateRef.current = state;
@@ -112,6 +116,26 @@ function EnrollmentWorkflowContent() {
     registerToolHandler(handleVoiceTool);
     return () => registerToolHandler(null);
   }, [handleVoiceTool, registerToolHandler]);
+
+  const handleInitialGreetingComplete = useCallback(() => {
+    const currentState = stateRef.current;
+    if (currentState.screenId !== "welcome") return false;
+
+    const event = { type: "START_MANUAL" } as const;
+    const nextState = enrollmentReducer(currentState, event);
+    if (nextState.screenId !== "requirements") return false;
+
+    dispatchEnrollment(event);
+    syncContext(
+      createEnrollmentScreenContext(nextState, speechPreferenceRef.current),
+    );
+    return true;
+  }, [dispatchEnrollment, syncContext]);
+
+  useEffect(() => {
+    registerInitialGreetingHandler(handleInitialGreetingComplete);
+    return () => registerInitialGreetingHandler(null);
+  }, [handleInitialGreetingComplete, registerInitialGreetingHandler]);
 
   useEffect(() => {
     syncContext(screenContext);

@@ -13,6 +13,7 @@ import {
 
 import {
   createBrowserVoiceRuntime,
+  type InitialGreetingCompleteHandler,
   type VoiceToolHandler,
   VoiceSessionController,
 } from "@/lib/voice-agent-client";
@@ -26,6 +27,9 @@ type VoiceGuideContextValue = {
   end: () => void;
   syncContext: (context: EnrollmentScreenContext) => void;
   registerToolHandler: (handler: VoiceToolHandler | null) => void;
+  registerInitialGreetingHandler: (
+    handler: InitialGreetingCompleteHandler | null,
+  ) => void;
 };
 
 const VoiceGuideContext = createContext<VoiceGuideContextValue | null>(null);
@@ -35,8 +39,12 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
   const controllerRef = useRef<VoiceSessionController | null>(null);
   const latestContextRef = useRef<EnrollmentScreenContext | null>(null);
   const toolHandlerRef = useRef<VoiceToolHandler | null>(null);
+  const initialGreetingHandlerRef =
+    useRef<InitialGreetingCompleteHandler | null>(null);
 
-  useEffect(() => {
+  const ensureController = useCallback(() => {
+    if (controllerRef.current) return controllerRef.current;
+
     const controller = new VoiceSessionController(
       createBrowserVoiceRuntime(),
       dispatch,
@@ -55,9 +63,15 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
         }
         return handler(call);
       },
+      () => initialGreetingHandlerRef.current?.() ?? false,
     );
     controllerRef.current = controller;
     if (latestContextRef.current) controller.updateContext(latestContextRef.current);
+    return controller;
+  }, []);
+
+  useEffect(() => {
+    const controller = ensureController();
 
     const endForPageExit = () => controller.dispose();
     window.addEventListener("pagehide", endForPageExit);
@@ -65,15 +79,18 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener("pagehide", endForPageExit);
       controller.dispose();
-      controllerRef.current = null;
+      if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, []);
+  }, [ensureController]);
 
   const start = useCallback(() => {
     if (state.status !== "off" && state.status !== "error") return;
     dispatch({ type: "START_REQUESTED" });
-    void controllerRef.current?.start();
-  }, [state.status]);
+    void ensureController().start({
+      autoAdvanceFromWelcome:
+        latestContextRef.current?.screenId === "welcome",
+    });
+  }, [ensureController, state.status]);
 
   const end = useCallback(() => controllerRef.current?.end(), []);
 
@@ -86,9 +103,30 @@ export function VoiceGuideProvider({ children }: { children: ReactNode }) {
     toolHandlerRef.current = handler;
   }, []);
 
+  const registerInitialGreetingHandler = useCallback(
+    (handler: InitialGreetingCompleteHandler | null) => {
+      initialGreetingHandlerRef.current = handler;
+    },
+    [],
+  );
+
   const value = useMemo(
-    () => ({ state, start, end, syncContext, registerToolHandler }),
-    [end, registerToolHandler, start, state, syncContext],
+    () => ({
+      state,
+      start,
+      end,
+      syncContext,
+      registerToolHandler,
+      registerInitialGreetingHandler,
+    }),
+    [
+      end,
+      registerInitialGreetingHandler,
+      registerToolHandler,
+      start,
+      state,
+      syncContext,
+    ],
   );
 
   return <VoiceGuideContext.Provider value={value}>{children}</VoiceGuideContext.Provider>;

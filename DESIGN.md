@@ -120,7 +120,7 @@ Voice states are labeled **Off**, **Connecting**, **Listening**, **Thinking**, *
 
 ### Buttons and actions
 
-Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. Successful voice tools create a concise polite status inside the guide. Field focus receives an amber outline that is temporary, keyboard-visible, scroll-aware, and removed on timeout or context change. The separate Repeat and slower-speech buttons remain visual command reminders; the supported Phase 5 path is a spoken request handled by verified tools.
+Product actions are semantic buttons with a minimum effective height of 44 pixels. Manual workflow actions use teal for forward progress and quiet outlined treatment for Previous or cancellation. Hover, active, and visible two-color focus states do not change control geometry. **Start Voice Guidance**, **End Guidance**, and **Retry Connection** follow the live session state. On Welcome, Start explains that a successful greeting begins guidance on Requirements; the completed real greeting moves focus to the Requirements heading and produces one polite step announcement. Successful voice tools create a concise polite status inside the guide. Field focus receives an amber outline that is temporary, keyboard-visible, scroll-aware, and removed on timeout or context change. The separate Repeat and slower-speech buttons remain visual command reminders; the supported Phase 5 path is a spoken request handled by verified tools.
 
 Recoverable voice failures focus the Retry control and keep manual enrollment available. Expected validation blocks use amber attention treatment rather than an error-success checkmark. Ending guidance leaves workflow focus and enrollment progress intact while announcing that the session ended.
 
@@ -128,7 +128,7 @@ Privacy and prohibited-action notices use the existing warning tokens, visible t
 
 ### Navigation and data display
 
-The five-step enrollment progress uses an ordered list, numbered circles, text labels, and `aria-current="step"`. Screen changes move focus to the new heading, while blocked progress moves focus to the first invalid control. Review data uses description lists, wraps long values safely, and exposes a text-labeled edit action for every section.
+The five-step enrollment progress uses an ordered list, numbered circles, text labels, and `aria-current="step"`. Screen changes move focus to the new heading, including the single deterministic post-greeting move from Welcome to Requirements; its announcement is “Requirements, step 1 of 5.” Blocked progress moves focus to the first invalid control. Review data uses description lists, wraps long values safely, and exposes a text-labeled edit action for every section.
 
 ### Forms and overlays
 

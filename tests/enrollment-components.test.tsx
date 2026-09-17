@@ -156,6 +156,24 @@ describe("enrollment components", () => {
     expect(liveRegion).not.toContain("[Sensitive number removed]");
   });
 
+  it("announces the guided transition without creating another live region", () => {
+    const markup = renderToStaticMarkup(
+      <VoiceGuideView
+        screenId="requirements"
+        state={{
+          ...initialVoiceState,
+          status: "listening",
+          guidanceMessage: "Requirements, step 1 of 5.",
+        }}
+        start={() => undefined}
+        end={() => undefined}
+      />,
+    );
+
+    expect(markup.match(/aria-live="polite"/g)).toHaveLength(1);
+    expect(markup.match(/Requirements, step 1 of 5\./g)).toHaveLength(2);
+  });
+
   it("renders recoverable permission, connection, and timeout errors", () => {
     for (const [errorCode, message] of [
       ["permission-denied", "Microphone access was denied"],

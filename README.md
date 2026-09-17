@@ -13,6 +13,7 @@ AksesSuara is designed as a demonstration for older adults, people with low digi
 - A complete six-screen simulated enrollment journey that also works without voice.
 - Deterministic, in-memory validation, sensitive-field masking, and explicit facility confirmation.
 - A real AssemblyAI Voice Agent session started only after an explicit user action.
+- A guided start that finishes the real greeting on Welcome, then moves exactly once to Requirements after its sanitized context is acknowledged.
 - Sanitized current-screen context that excludes raw form values.
 - Eight allowlisted client-side tools for explanation, focus, validation, one-step navigation, repetition, speech-style preference, and Review.
 - Accessible live status, final agent captions, error recovery, keyboard operation, and responsive layouts.
@@ -35,7 +36,11 @@ Typed demo data → React reducer → deterministic validation and masking
                                       ↓
                          sanitized screen context
                                       ↓
-Explicit Start → server-only temporary token → AssemblyAI Voice Agent
+Explicit Start → server-only temporary token → AssemblyAI Voice Agent greeting
+                                      ↓
+                         deterministic Requirements transition
+                                      ↓
+                     acknowledged Requirements screen context
                                       ↓
                          allowlisted client tool request
                                       ↓
@@ -91,6 +96,8 @@ npx playwright install chromium
 ```
 
 The automated browser suite uses no real AssemblyAI credential and does not claim to test a paid voice session.
+
+For a live guided start, choose **Start Voice Guidance** on Welcome and allow microphone access. The app applies the verified Welcome context, plays the real greeting completely, moves to Requirements once, focuses its heading, waits for the Requirements context acknowledgement, and then resumes Listening. Starting or retrying voice from another screen never changes the current enrollment step. **Continue Without Voice** remains the direct manual path to Requirements.
 
 ## Approved dummy demo data
 

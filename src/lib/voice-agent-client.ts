@@ -52,6 +52,7 @@ export interface VoiceSocket {
 export interface VoiceAudioSession {
   play(base64Audio: string): void;
   interrupt(): void;
+  waitForPlaybackComplete(): Promise<void>;
   close(): void | Promise<void>;
 }
 
@@ -66,6 +67,19 @@ export interface VoiceRuntime {
 }
 
 type ControllerPhase = "idle" | "starting" | "active" | "ending";
+type InitialGreetingPhase =
+  | "inactive"
+  | "awaiting-reply"
+  | "playing"
+  | "awaiting-prerequisites"
+  | "completed"
+  | "cancelled";
+
+export type VoiceStartOptions = {
+  autoAdvanceFromWelcome?: boolean;
+};
+
+export type InitialGreetingCompleteHandler = () => boolean;
 
 export type VoiceToolHandler = (call: VoiceToolCall) => VoiceToolExecution;
 
@@ -113,6 +127,12 @@ export class VoiceSessionController {
   private abortController: AbortController | null = null;
   private providerSessionReady = false;
   private guidanceReady = false;
+  private initialConfigurationContext: ReturnType<typeof createVoiceContextSnapshot> | null = null;
+  private initialGreetingPhase: InitialGreetingPhase = "inactive";
+  private initialGreetingReplyId: string | null = null;
+  private initialGreetingPlaybackComplete = false;
+  private initialWelcomeContextAcknowledged = false;
+  private awaitingGuidedStartContext = false;
   private socketOpened = false;
   private sessionEndSent = false;
   private sessionEndTimer: ReturnType<typeof setTimeout> | null = null;
@@ -130,6 +150,7 @@ export class VoiceSessionController {
     private readonly runtime: VoiceRuntime,
     private readonly emit: (event: VoiceClientEvent) => void,
     private readonly handleTool?: VoiceToolHandler,
+    private readonly handleInitialGreetingComplete?: InitialGreetingCompleteHandler,
   ) {}
 
   updateContext(context: EnrollmentScreenContext): boolean {
@@ -141,11 +162,21 @@ export class VoiceSessionController {
     return true;
   }
 
-  async start(): Promise<boolean> {
+  async start(options: VoiceStartOptions = {}): Promise<boolean> {
     if (this.phase !== "idle") return false;
 
     this.phase = "starting";
     const generation = ++this.generation;
+    const shouldAutoAdvance =
+      options.autoAdvanceFromWelcome === true &&
+      this.latestContext?.screenId === "welcome";
+    this.initialGreetingPhase = shouldAutoAdvance
+      ? "awaiting-reply"
+      : "inactive";
+    this.initialGreetingReplyId = null;
+    this.initialGreetingPlaybackComplete = false;
+    this.initialWelcomeContextAcknowledged = false;
+    this.awaitingGuidedStartContext = false;
     const abortController = new AbortController();
     this.abortController = abortController;
 
@@ -175,7 +206,16 @@ export class VoiceSessionController {
       socket.onopen = () => {
         if (!this.isCurrent(generation)) return;
         this.socketOpened = true;
-        this.send(voiceSessionConfiguration);
+        this.initialConfigurationContext = this.latestContext;
+        this.send({
+          ...voiceSessionConfiguration,
+          session: {
+            ...voiceSessionConfiguration.session,
+            system_prompt:
+              this.initialConfigurationContext?.systemPrompt ??
+              voiceSessionConfiguration.session.system_prompt,
+          },
+        });
       };
       socket.onmessage = (event) => this.handleMessage(generation, event.data);
       socket.onerror = () => {
@@ -199,6 +239,7 @@ export class VoiceSessionController {
     if (this.phase === "idle" || this.phase === "ending") return;
     this.phase = "ending";
     this.guidanceReady = false;
+    this.cancelInitialGreeting();
     this.pendingToolCalls = [];
     this.audio?.interrupt();
 
@@ -242,14 +283,14 @@ export class VoiceSessionController {
 
     switch (message.type) {
       case "session.ready":
-        this.providerSessionReady = true;
-        this.sendLatestContextIfReady();
+        this.handleSessionReady(message);
         break;
       case "session.updated":
         this.handleSessionUpdated(message);
         break;
       case "input.speech.started":
         this.lastProtocolEvent = message.type;
+        this.cancelInitialGreeting();
         this.audio?.interrupt();
         this.emit({ type: "USER_SPEECH_STARTED" });
         break;
@@ -273,15 +314,21 @@ export class VoiceSessionController {
         break;
       case "reply.started":
         this.lastProtocolEvent = message.type;
+        this.markInitialGreetingStarted(message);
         this.emit({ type: "REPLY_STARTED" });
         break;
       case "reply.audio":
         if (typeof message.data === "string") {
           this.emit({ type: "REPLY_AUDIO" });
-          this.audio?.play(message.data);
+          try {
+            this.audio?.play(message.data);
+          } catch {
+            this.fail(generation, "connection-failed");
+          }
         }
         break;
       case "transcript.agent":
+        if (message.interrupted === true) this.cancelInitialGreeting();
         if (typeof message.text === "string") {
           this.emit({
             type: "AGENT_TRANSCRIPT",
@@ -291,12 +338,11 @@ export class VoiceSessionController {
         break;
       case "reply.done":
         this.lastProtocolEvent = message.type;
-        if (message.status === "interrupted") this.audio?.interrupt();
-        if (message.status === "interrupted") this.pendingToolCalls = [];
-        else this.flushPendingToolCalls();
-        this.emit({ type: "REPLY_DONE" });
+        if (this.handleInitialGreetingDone(generation, message)) break;
+        this.handleReplyDone(message);
         break;
       case "tool.call":
+        this.cancelInitialGreeting();
         this.queueToolCall(message);
         break;
       case "session.error":
@@ -331,6 +377,12 @@ export class VoiceSessionController {
     this.abortController = null;
     this.providerSessionReady = false;
     this.guidanceReady = false;
+    this.initialConfigurationContext = null;
+    this.initialGreetingPhase = "inactive";
+    this.initialGreetingReplyId = null;
+    this.initialGreetingPlaybackComplete = false;
+    this.initialWelcomeContextAcknowledged = false;
+    this.awaitingGuidedStartContext = false;
     this.socketOpened = false;
     this.sessionEndSent = false;
     if (this.sessionEndTimer) clearTimeout(this.sessionEndTimer);
@@ -371,11 +423,64 @@ export class VoiceSessionController {
       return;
     }
 
-    this.appliedContextKey = this.contextUpdateInFlight.semanticKey;
+    const acknowledgedContext = this.contextUpdateInFlight;
+    this.appliedContextKey = acknowledgedContext.semanticKey;
     this.contextUpdateInFlight = null;
+    this.recordAcknowledgedContext(acknowledgedContext);
 
     if (this.latestContext?.semanticKey !== this.appliedContextKey) {
       this.sendLatestContextIfReady();
+      return;
+    }
+
+    this.resumeGuidanceAfterContext(acknowledgedContext.screenId);
+  }
+
+  private handleSessionReady(message: Record<string, unknown>): void {
+    this.providerSessionReady = true;
+    const configuredContext = this.initialConfigurationContext;
+    if (
+      configuredContext &&
+      acknowledgedSystemPrompt(message) === configuredContext.systemPrompt
+    ) {
+      this.appliedContextKey = configuredContext.semanticKey;
+      this.recordAcknowledgedContext(configuredContext);
+    }
+
+    if (this.latestContext?.semanticKey !== this.appliedContextKey) {
+      this.sendLatestContextIfReady();
+      return;
+    }
+
+    if (this.latestContext) {
+      this.resumeGuidanceAfterContext(this.latestContext.screenId);
+    }
+  }
+
+  private recordAcknowledgedContext(
+    context: ReturnType<typeof createVoiceContextSnapshot>,
+  ): void {
+    if (
+      context.screenId === "welcome" &&
+      this.initialGreetingPhase !== "inactive" &&
+      this.initialGreetingPhase !== "cancelled"
+    ) {
+      this.initialWelcomeContextAcknowledged = true;
+      this.maybeCompleteInitialGreeting(this.generation);
+    }
+  }
+
+  private resumeGuidanceAfterContext(
+    screenId: EnrollmentScreenContext["screenId"],
+  ): void {
+    if (this.awaitingGuidedStartContext) {
+      this.awaitingGuidedStartContext = false;
+      this.guidanceReady = true;
+      if (screenId === "requirements") {
+        this.emit({ type: "GUIDED_JOURNEY_READY" });
+      } else {
+        this.emit({ type: "SESSION_READY" });
+      }
       return;
     }
 
@@ -383,6 +488,105 @@ export class VoiceSessionController {
       this.guidanceReady = true;
       this.emit({ type: "SESSION_READY" });
     }
+  }
+
+  private markInitialGreetingStarted(message: Record<string, unknown>): void {
+    if (
+      this.initialGreetingPhase !== "awaiting-reply" ||
+      !this.providerSessionReady ||
+      typeof message.reply_id !== "string"
+    ) {
+      return;
+    }
+
+    this.initialGreetingReplyId = message.reply_id;
+    this.initialGreetingPhase = "playing";
+  }
+
+  private handleInitialGreetingDone(
+    generation: number,
+    message: Record<string, unknown>,
+  ): boolean {
+    if (
+      typeof message.reply_id === "string" &&
+      message.reply_id === this.initialGreetingReplyId &&
+      (this.initialGreetingPhase === "awaiting-prerequisites" ||
+        this.initialGreetingPhase === "completed")
+    ) {
+      return true;
+    }
+
+    if (
+      this.initialGreetingPhase !== "playing" ||
+      typeof message.reply_id !== "string" ||
+      message.reply_id !== this.initialGreetingReplyId
+    ) {
+      return false;
+    }
+
+    if (message.status !== "completed") {
+      this.cancelInitialGreeting();
+      this.handleReplyDone(message);
+      return true;
+    }
+
+    this.initialGreetingPhase = "awaiting-prerequisites";
+    void this.audio?.waitForPlaybackComplete().then(() => {
+      if (!this.isCurrent(generation) || this.phase !== "active") return;
+      if (this.initialGreetingPhase !== "awaiting-prerequisites") return;
+      this.initialGreetingPlaybackComplete = true;
+      this.maybeCompleteInitialGreeting(generation);
+    });
+    return true;
+  }
+
+  private maybeCompleteInitialGreeting(generation: number): void {
+    if (
+      !this.isCurrent(generation) ||
+      this.initialGreetingPhase !== "awaiting-prerequisites" ||
+      !this.initialGreetingPlaybackComplete ||
+      !this.initialWelcomeContextAcknowledged
+    ) {
+      return;
+    }
+
+    this.initialGreetingPhase = "completed";
+    const wasGuidanceReady = this.guidanceReady;
+    this.guidanceReady = false;
+    this.awaitingGuidedStartContext = true;
+
+    let transitioned = false;
+    try {
+      transitioned = this.handleInitialGreetingComplete?.() === true;
+    } catch {
+      transitioned = false;
+    }
+
+    if (!transitioned) {
+      this.awaitingGuidedStartContext = false;
+      this.guidanceReady = wasGuidanceReady;
+      this.emit({ type: "REPLY_DONE" });
+    }
+  }
+
+  private cancelInitialGreeting(): void {
+    if (
+      this.initialGreetingPhase === "inactive" ||
+      this.initialGreetingPhase === "completed" ||
+      this.initialGreetingPhase === "cancelled"
+    ) {
+      return;
+    }
+    this.initialGreetingPhase = "cancelled";
+    this.initialGreetingReplyId = null;
+    this.initialGreetingPlaybackComplete = false;
+  }
+
+  private handleReplyDone(message: Record<string, unknown>): void {
+    if (message.status === "interrupted") this.audio?.interrupt();
+    if (message.status === "interrupted") this.pendingToolCalls = [];
+    else this.flushPendingToolCalls();
+    this.emit({ type: "REPLY_DONE" });
   }
 
   private sendLatestContextIfReady(): void {
@@ -521,6 +725,7 @@ class BrowserAudioSession implements VoiceAudioSession {
   private readonly worklet: AudioWorkletNode;
   private readonly silentGain: GainNode;
   private readonly playingSources = new Set<AudioBufferSourceNode>();
+  private readonly playbackWaiters = new Set<() => void>();
   private playbackTime = 0;
 
   static async create(
@@ -583,7 +788,10 @@ class BrowserAudioSession implements VoiceAudioSession {
     source.start(startsAt);
     this.playbackTime = startsAt + buffer.duration;
     this.playingSources.add(source);
-    source.onended = () => this.playingSources.delete(source);
+    source.onended = () => {
+      this.playingSources.delete(source);
+      this.resolvePlaybackWaitersIfIdle();
+    };
   }
 
   interrupt(): void {
@@ -596,6 +804,18 @@ class BrowserAudioSession implements VoiceAudioSession {
     }
     this.playingSources.clear();
     this.playbackTime = this.playbackContext.currentTime;
+    this.resolvePlaybackWaitersIfIdle();
+  }
+
+  waitForPlaybackComplete(): Promise<void> {
+    if (this.playingSources.size === 0) return Promise.resolve();
+    return new Promise((resolve) => this.playbackWaiters.add(resolve));
+  }
+
+  private resolvePlaybackWaitersIfIdle(): void {
+    if (this.playingSources.size > 0) return;
+    for (const resolve of this.playbackWaiters) resolve();
+    this.playbackWaiters.clear();
   }
 
   async close(): Promise<void> {
